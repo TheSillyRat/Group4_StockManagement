@@ -1,0 +1,37 @@
+@webAPI_HostAddress = http://localhost:5000
+
+### 1. Get All Products
+GET {{webAPI_HostAddress}}/api/products
+Accept: application/json
+
+### 2. Get All Warehouses
+GET {{webAPI_HostAddress}}/api/warehouses
+Accept: application/json
+
+### 3. Get All Suppliers
+GET {{webAPI_HostAddress}}/api/suppliers
+Accept: application/json
+
+### 4. AI Inventory Data Extraction (Example Test Case 1)
+POST {{webAPI_HostAddress}}/api/inventory/ai-extract
+Content-Type: application/json
+
+{
+  "prompt": "Receive 20 boxes of Product A from Supplier X into Binh Tan Warehouse."
+}
+
+### 5. Confirm Transaction
+POST {{webAPI_HostAddress}}/api/inventory/confirm
+Content-Type: application/json
+
+{
+  "transactionType": "Receive",
+  "productId": 1,
+  "supplierId": 1,
+  "warehouseId": 1,
+  "quantity": 20
+}
+
+### 6. Get Transaction History
+GET {{webAPI_HostAddress}}/api/inventory/history
+Accept: application/json
