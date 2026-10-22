@@ -25,6 +25,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddHttpClient<IGeminiService, GeminiService>(client =>
     client.Timeout = TimeSpan.FromSeconds(20));
 builder.Services.AddScoped<IInventoryService, InventoryService>();
+builder.Services.AddHttpClient<CatalogAiService>(client => client.Timeout = TimeSpan.FromSeconds(20));
 
 // 4. Add Controllers & Swagger
 builder.Services.AddControllers();

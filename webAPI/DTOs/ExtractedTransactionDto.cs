@@ -22,6 +22,9 @@ public class ExtractedTransactionDto
     public bool SupplierExists { get; set; }
     public bool WarehouseExists { get; set; }
     public bool IsValid { get; set; }
+    public bool ProductNotFound { get; set; }
+    public bool CanCreateProduct { get; set; }
+    public string? ValidationMessage { get; set; }
 
     // Ambiguity handling (R4.7)
     public bool IsAmbiguous { get; set; }

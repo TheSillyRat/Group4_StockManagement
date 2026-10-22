@@ -93,7 +93,8 @@ Rules:
 2. If the user request lacks essential details such as product name, target warehouse, or quantity (for example: ""Send some items to warehouse"", ""Nhập một ít hàng"", ""Move items""), set ""isAmbiguous"": true and provide a specific clarificationMessage listing what is missing.
 3. For ""Receive"" transactions, extract supplierName if mentioned. For ""Dispatch"" transactions, supplierName should be null unless explicitly stated.
 4. Quantity must be a positive integer > 0. If missing or non-numeric, mark ""isAmbiguous"": true.
-5. Return RAW JSON only, without markdown fences (no ```json or ```).";
+5. Return RAW JSON only, without markdown fences (no ```json or ```).
+6. Preserve the exact product name from the request, including new or unfamiliar products. Never replace it with an example product. Product existence is checked against the database by the application, not by you.";
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.deepseek.com/chat/completions");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);

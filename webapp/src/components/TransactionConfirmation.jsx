@@ -10,6 +10,7 @@ export default function TransactionConfirmation({
   suppliers = [],
 }) {
   const [form, setForm] = useState(extractedData);
+  const [createNewProduct, setCreateNewProduct] = useState(false);
   const product = products.find(
     (p) =>
       p.productId === Number(form.productId) ||
@@ -33,6 +34,7 @@ export default function TransactionConfirmation({
   );
   const qty = Number(form.quantity);
   const isDispatch = form.transactionType === "Dispatch";
+  const isReceive = form.transactionType === "Receive";
   const validType = ["Receive", "Dispatch"].includes(form.transactionType);
   const insufficient = isDispatch && product && qty > product.stockQuantity;
   const wrongUnit =
@@ -40,9 +42,20 @@ export default function TransactionConfirmation({
     form.unit &&
     form.unit.trim().toLowerCase() !== product.unit.toLowerCase();
   const unknownSupplier = (form.supplierId || form.supplierName) && !supplier;
+  const missingProduct = !product && !!form.productName?.trim();
+  const creatingProduct = isReceive && !product && createNewProduct;
+  const newProductValid =
+    creatingProduct &&
+    form.productName?.trim() &&
+    form.productName.trim().length <= 200 &&
+    form.unit?.trim() &&
+    form.unit.trim().length <= 50;
+  const previewProduct =
+    product ||
+    (creatingProduct ? { stockQuantity: 0, unit: form.unit || "" } : null);
   const valid =
     validType &&
-    product &&
+    (product || newProductValid) &&
     warehouse &&
     Number.isInteger(qty) &&
     qty > 0 &&
@@ -56,11 +69,13 @@ export default function TransactionConfirmation({
     if (!valid || isSubmitting) return;
     onConfirm({
       transactionType: form.transactionType,
-      productId: product.productId,
+      productId: product?.productId || null,
+      productName: product?.productName || form.productName.trim(),
+      createNewProduct: !!creatingProduct,
       warehouseId: warehouse.warehouseId,
       supplierId: supplier?.supplierId || null,
       quantity: qty,
-      unit: product.unit,
+      unit: product?.unit || form.unit.trim(),
     });
   };
   return (
@@ -81,6 +96,65 @@ export default function TransactionConfirmation({
           {valid ? "Sẵn sàng xác nhận" : "Cần kiểm tra thông tin"}
         </span>
       </div>
+      {missingProduct && isDispatch && (
+        <div className="alert alert-error" role="alert">
+          <Icon name="alert" />
+          <div>
+            <strong>Sản phẩm không tồn tại</strong>
+            <p>
+              “{form.productName}” chưa có trong danh mục. Không thể xuất kho
+              sản phẩm này. Vui lòng chọn sản phẩm có sẵn.
+            </p>
+          </div>
+        </div>
+      )}
+      {missingProduct && isReceive && !createNewProduct && (
+        <div className="alert alert-warning new-product-question" role="alert">
+          <Icon name="alert" />
+          <div>
+            <strong>Sản phẩm “{form.productName}” chưa tồn tại.</strong>
+            <p>Bạn có muốn tạo sản phẩm mới và nhập kho không?</p>
+            <div className="new-product-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={isSubmitting}
+                onClick={() => setCreateNewProduct(true)}
+              >
+                Có, tạo sản phẩm mới
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline"
+                disabled={isSubmitting}
+                onClick={() => {
+                  setCreateNewProduct(false);
+                  setForm((f) => ({
+                    ...f,
+                    productId: null,
+                    productName: "",
+                    unit: "",
+                  }));
+                }}
+              >
+                Không, chọn sản phẩm có sẵn
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {creatingProduct && (
+        <div className="alert alert-success" role="status">
+          <Icon name="plus" />
+          <div>
+            <strong>Tạo sản phẩm mới & nhập kho</strong>
+            <p>
+              Kiểm tra tên, đơn vị và số lượng. Sản phẩm chỉ được tạo khi bạn
+              bấm xác nhận bên dưới.
+            </p>
+          </div>
+        </div>
+      )}
       <form onSubmit={submit}>
         <fieldset disabled={isSubmitting}>
           <div className="form-grid">
@@ -89,7 +163,10 @@ export default function TransactionConfirmation({
               <select
                 id="review-type"
                 value={form.transactionType || ""}
-                onChange={(e) => update("transactionType", e.target.value)}
+                onChange={(e) => {
+                  update("transactionType", e.target.value);
+                  setCreateNewProduct(false);
+                }}
                 required
               >
                 <option value="" disabled>
@@ -103,9 +180,23 @@ export default function TransactionConfirmation({
               <label htmlFor="review-product">Sản phẩm *</label>
               <select
                 id="review-product"
-                value={product?.productId || ""}
+                value={
+                  product?.productId ||
+                  (missingProduct || creatingProduct ? "__new__" : "")
+                }
                 required
                 onChange={(e) => {
+                  if (e.target.value === "__new__") {
+                    setCreateNewProduct(true);
+                    setForm((f) => ({
+                      ...f,
+                      productId: null,
+                      productName: "",
+                      unit: "",
+                    }));
+                    return;
+                  }
+                  setCreateNewProduct(false);
                   const p = products.find(
                     (x) => x.productId === Number(e.target.value),
                   );
@@ -122,6 +213,13 @@ export default function TransactionConfirmation({
                     ? `${form.productName} — cần chọn lại`
                     : "Chọn sản phẩm"}
                 </option>
+                {isReceive && (
+                  <option value="__new__">
+                    {missingProduct
+                      ? `${form.productName} — sản phẩm mới`
+                      : "Tạo sản phẩm mới..."}
+                  </option>
+                )}
                 {products.map((p) => (
                   <option key={p.productId} value={p.productId}>
                     {p.productName}
@@ -129,6 +227,25 @@ export default function TransactionConfirmation({
                 ))}
               </select>
             </div>
+            {creatingProduct && (
+              <div className="form-field">
+                <label htmlFor="new-product-name">Tên sản phẩm mới *</label>
+                <input
+                  id="new-product-name"
+                  value={form.productName || ""}
+                  maxLength={200}
+                  required
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      productId: null,
+                      productName: e.target.value,
+                    }))
+                  }
+                  placeholder="Nhập tên sản phẩm mới"
+                />
+              </div>
+            )}
             <div className="form-field">
               <label htmlFor="review-warehouse">Kho hàng *</label>
               <select
@@ -176,10 +293,22 @@ export default function TransactionConfirmation({
               <label htmlFor="review-unit">Đơn vị tính</label>
               <input
                 id="review-unit"
-                readOnly
-                value={product?.unit || form.unit || "—"}
+                readOnly={!creatingProduct}
+                required={!!creatingProduct}
+                maxLength={50}
+                value={product?.unit || form.unit || ""}
+                onChange={(e) => update("unit", e.target.value)}
+                placeholder={
+                  creatingProduct
+                    ? "Ví dụ: box, kg, cái"
+                    : "Chọn sản phẩm để xem đơn vị"
+                }
               />
-              <small>Theo đơn vị chuẩn của sản phẩm.</small>
+              <small>
+                {creatingProduct
+                  ? "Đơn vị này sẽ được lưu cho sản phẩm mới."
+                  : "Theo đơn vị chuẩn của sản phẩm."}
+              </small>
             </div>
             <div className="form-field">
               <label htmlFor="review-supplier">
@@ -236,13 +365,13 @@ export default function TransactionConfirmation({
             trống.
           </p>
         )}
-        {product && validType && (
+        {previewProduct && validType && (
           <div className={`stock-preview ${insufficient ? "invalid" : ""}`}>
             <div>
               <small>TỒN HIỆN TẠI · TOÀN HỆ THỐNG</small>
               <strong>
-                {product.stockQuantity.toLocaleString("vi-VN")}{" "}
-                <span>{product.unit}</span>
+                {previewProduct.stockQuantity.toLocaleString("vi-VN")}{" "}
+                <span>{previewProduct.unit}</span>
               </strong>
             </div>
             <Icon name="arrow" />
@@ -251,7 +380,7 @@ export default function TransactionConfirmation({
               <strong className={isDispatch ? "text-warning" : "text-success"}>
                 {isDispatch ? "−" : "+"}
                 {Number.isFinite(qty) ? qty.toLocaleString("vi-VN") : "—"}{" "}
-                <span>{product.unit}</span>
+                <span>{previewProduct.unit}</span>
               </strong>
             </div>
             <Icon name="arrow" />
@@ -260,10 +389,10 @@ export default function TransactionConfirmation({
               <strong>
                 {Number.isFinite(qty)
                   ? (
-                      product.stockQuantity + (isDispatch ? -qty : qty)
+                      previewProduct.stockQuantity + (isDispatch ? -qty : qty)
                     ).toLocaleString("vi-VN")
                   : "—"}{" "}
-                <span>{product.unit}</span>
+                <span>{previewProduct.unit}</span>
               </strong>
             </div>
           </div>
@@ -297,7 +426,11 @@ export default function TransactionConfirmation({
             ) : (
               <Icon name="check" size={17} />
             )}{" "}
-            {isSubmitting ? "Đang lưu..." : "Xác nhận & lưu giao dịch"}
+            {isSubmitting
+              ? "Đang lưu..."
+              : creatingProduct
+                ? "Xác nhận tạo sản phẩm & nhập kho"
+                : "Xác nhận & lưu giao dịch"}
           </button>
         </div>
       </form>

@@ -2,7 +2,9 @@
 import { inventoryApi } from "../services/api";
 import Icon from "../components/Icon";
 import { Metric, Search, Empty, Pagination } from "../components/DataUI";
+import CatalogAiChat from "../components/CatalogAiChat";
 export default function WarehouseManagement({ onDataChange }) {
+  const [aiBusy, setAiBusy] = useState(false);
   const [warehouses, setWarehouses] = useState([]),
     [loading, setLoading] = useState(true),
     [notice, setNotice] = useState(null),
@@ -39,7 +41,7 @@ export default function WarehouseManagement({ onDataChange }) {
       if (e.key === "Tab") {
         const els = [
           ...dialogRef.current.querySelectorAll(
-            "button:not(:disabled),input:not(:disabled)",
+            "button:not(:disabled),input:not(:disabled),textarea:not(:disabled)",
           ),
         ];
         if (!els.length) {
@@ -72,7 +74,7 @@ export default function WarehouseManagement({ onDataChange }) {
   };
   const save = async (e) => {
     e.preventDefault();
-    if (submitting) return;
+    if (submitting || aiBusy) return;
     setSubmitting(true);
     setFormError("");
     try {
@@ -260,6 +262,16 @@ export default function WarehouseManagement({ onDataChange }) {
                 ? `Kho “${modal.warehouseName}” sẽ bị xóa khỏi danh mục. Thao tác này không thể hoàn tác.`
                 : "Đặt tên rõ ràng để dễ chọn khi nhập hoặc xuất hàng."}
             </p>
+            {modal.mode === "create" && (
+              <CatalogAiChat
+                entityType="warehouse"
+                disabled={submitting}
+                onBusyChange={setAiBusy}
+                onApply={(result) => {
+                  if (result.warehouseName) setName(result.warehouseName);
+                }}
+              />
+            )}
             <form onSubmit={save}>
               {modal.mode !== "delete" && (
                 <div className="form-field">
@@ -270,7 +282,7 @@ export default function WarehouseManagement({ onDataChange }) {
                     onChange={(e) => setName(e.target.value)}
                     maxLength={200}
                     required
-                    disabled={submitting}
+                    disabled={submitting || aiBusy}
                     placeholder="Ví dụ: Kho Bình Tân"
                   />
                 </div>
@@ -293,7 +305,9 @@ export default function WarehouseManagement({ onDataChange }) {
                   type="submit"
                   className={`btn ${modal.mode === "delete" ? "btn-danger-outline" : "btn-primary"}`}
                   disabled={
-                    submitting || (modal.mode !== "delete" && !name.trim())
+                    submitting ||
+                    aiBusy ||
+                    (modal.mode !== "delete" && !name.trim())
                   }
                 >
                   {submitting

@@ -249,7 +249,9 @@ export default function App() {
                 onDataChange={load}
               />
             )}{" "}
-            {activeTab === "products" && <ProductManagement />}
+            {activeTab === "products" && (
+              <ProductManagement onDataChange={load} />
+            )}
             {activeTab === "warehouses" && (
               <WarehouseManagement onDataChange={load} />
             )}{" "}

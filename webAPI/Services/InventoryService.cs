@@ -30,14 +30,11 @@ public class InventoryService : IInventoryService
     public async Task<ExtractedTransactionDto> ValidateExtractedDataAsync(ExtractedTransactionDto dto)
     {
         var unitMatches = true;
-        if (dto.IsAmbiguous)
-        {
-            dto.ProductExists = false;
-            dto.WarehouseExists = false;
-            dto.SupplierExists = false;
-            dto.IsValid = false;
-            return dto;
-        }
+        // These fields must come from the database, never from the AI response.
+        dto.ProductId = dto.WarehouseId = dto.SupplierId = null;
+        dto.ProductExists = dto.WarehouseExists = dto.SupplierExists = false;
+        dto.ProductNotFound = dto.CanCreateProduct = false;
+        dto.ValidationMessage = null;
 
         // 1. Validate Product Name against database
         if (!string.IsNullOrWhiteSpace(dto.ProductName))
@@ -59,6 +56,11 @@ public class InventoryService : IInventoryService
             else
             {
                 dto.ProductExists = false;
+                dto.ProductNotFound = true;
+                dto.CanCreateProduct = string.Equals(dto.TransactionType, "Receive", StringComparison.OrdinalIgnoreCase);
+                dto.ValidationMessage = dto.CanCreateProduct
+                    ? $"Sản phẩm '{dto.ProductName.Trim()}' chưa tồn tại. Bạn có muốn tạo sản phẩm mới và nhập kho không?"
+                    : $"Sản phẩm '{dto.ProductName.Trim()}' không tồn tại. Không thể xuất kho sản phẩm này.";
             }
         }
         else
@@ -156,6 +158,15 @@ public class InventoryService : IInventoryService
         }
 
         // 2. Resolve Product
+        bool isReceive = normalizedType.Equals("Receive", StringComparison.OrdinalIgnoreCase);
+        if (request.CreateNewProduct && !isReceive)
+            return new ConfirmResult { Success = false, Message = "Không thể tạo sản phẩm mới khi xuất kho. Sản phẩm phải tồn tại trước khi xuất." };
+
+        if (request.CreateNewProduct &&
+            (request.ProductId.HasValue || string.IsNullOrWhiteSpace(request.ProductName) ||
+             request.ProductName.Trim().Length > 200 || string.IsNullOrWhiteSpace(request.Unit) || request.Unit.Trim().Length > 50))
+            return new ConfirmResult { Success = false, Message = "Để tạo sản phẩm mới, cần tên sản phẩm (tối đa 200 ký tự), đơn vị tính (tối đa 50 ký tự) và không gửi mã sản phẩm có sẵn." };
+
         Product? product = null;
         if (request.ProductId.HasValue && request.ProductId.Value > 0)
         {
@@ -167,16 +178,22 @@ public class InventoryService : IInventoryService
             product = await _context.Products.FirstOrDefaultAsync(p => p.ProductName.ToLower() == pName);
         }
 
-        if (product == null)
+        if (request.CreateNewProduct && product != null)
+            return new ConfirmResult { Success = false, Message = "Sản phẩm đã tồn tại. Vui lòng làm mới danh mục và chọn sản phẩm có sẵn để nhập kho." };
+
+        bool createProduct = product == null && request.CreateNewProduct;
+        if (product == null && !createProduct)
         {
             return new ConfirmResult
             {
                 Success = false,
-                Message = $"Product not found. Provided ProductId: {request.ProductId}, Name: '{request.ProductName}'."
+                Message = isReceive
+                    ? "Sản phẩm không tồn tại. Vui lòng xác nhận tạo sản phẩm mới trước khi nhập kho."
+                    : "Sản phẩm không tồn tại. Không thể xuất kho sản phẩm này."
             };
         }
 
-        if (!string.IsNullOrWhiteSpace(request.Unit) &&
+        if (product != null && !string.IsNullOrWhiteSpace(request.Unit) &&
             !string.Equals(request.Unit.Trim(), product.Unit, StringComparison.OrdinalIgnoreCase))
         {
             return new ConfirmResult { Success = false, Message = $"Đơn vị tính phải là '{product.Unit}'. Hệ thống chưa hỗ trợ quy đổi đơn vị." };
@@ -220,12 +237,26 @@ public class InventoryService : IInventoryService
 
         // Update stock in SQL, under the same transaction as the history insert.
         // A conditional UPDATE prevents lost updates and concurrent over-dispatch.
-        using var dbTransaction = await _context.Database.BeginTransactionAsync();
+        using var dbTransaction = await _context.Database.BeginTransactionAsync(createProduct
+            ? System.Data.IsolationLevel.Serializable
+            : System.Data.IsolationLevel.ReadCommitted);
         try
         {
-            bool isReceive = normalizedType.Equals("Receive", StringComparison.OrdinalIgnoreCase);
+            if (createProduct)
+            {
+                // Recheck under SERIALIZABLE so concurrent creation cannot insert the same name twice.
+                var normalizedName = request.ProductName!.Trim().ToLower();
+                if (await _context.Products.AnyAsync(p => p.ProductName.ToLower() == normalizedName))
+                {
+                    await dbTransaction.RollbackAsync();
+                    return new ConfirmResult { Success = false, Message = "Sản phẩm vừa được tạo bởi giao dịch khác. Vui lòng làm mới và chọn sản phẩm có sẵn." };
+                }
+                product = new Product { ProductName = request.ProductName.Trim(), Unit = request.Unit!.Trim(), StockQuantity = 0 };
+                _context.Products.Add(product);
+                await _context.SaveChangesAsync();
+            }
 
-            var stockQuery = _context.Products.Where(p => p.ProductId == product.ProductId);
+            var stockQuery = _context.Products.Where(p => p.ProductId == product!.ProductId);
             int affected;
             if (isReceive)
                 affected = await stockQuery
@@ -248,7 +279,7 @@ public class InventoryService : IInventoryService
             // Create InventoryTransaction record
             var transactionRecord = new InventoryTransaction
             {
-                ProductId = product.ProductId,
+                ProductId = product!.ProductId,
                 SupplierId = supplier?.SupplierId,
                 WarehouseId = warehouse.WarehouseId,
                 TransactionType = isReceive ? "Receive" : "Dispatch",
@@ -265,7 +296,7 @@ public class InventoryService : IInventoryService
             return new ConfirmResult
             {
                 Success = true,
-                Message = $"Đã lưu giao dịch #{transactionRecord.TransactionId}. Tồn kho {product.ProductName}: {newStock} {product.Unit}.",
+                Message = $"{(createProduct ? "Đã tạo sản phẩm mới và nhập kho. " : "")}Đã lưu giao dịch #{transactionRecord.TransactionId}. Tồn kho {product.ProductName}: {newStock} {product.Unit}.",
                 TransactionId = transactionRecord.TransactionId,
                 NewStockQuantity = newStock
             };
@@ -273,6 +304,7 @@ public class InventoryService : IInventoryService
         catch (Exception ex)
         {
             await dbTransaction.RollbackAsync();
+            _context.ChangeTracker.Clear();
             _logger.LogError(ex, "Transaction failed and rolled back.");
             return new ConfirmResult
             {

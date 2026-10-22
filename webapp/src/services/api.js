@@ -8,7 +8,9 @@ async function request(path, options = {}) {
         ...(options.body ? { "Content-Type": "application/json" } : {}),
         ...options.headers,
       },
-      signal: AbortSignal.timeout(45000),
+      signal: options.signal
+        ? AbortSignal.any([options.signal, AbortSignal.timeout(45000)])
+        : AbortSignal.timeout(45000),
     });
   } catch (err) {
     throw new Error(
@@ -17,7 +19,14 @@ async function request(path, options = {}) {
         : "Không kết nối được máy chủ. Vui lòng kiểm tra backend và thử lại.",
     );
   }
-  const json = await res.json().catch(() => null);
+  const json = await res.json().catch(() => {
+    throw new Error(
+      "Máy chủ trả về dữ liệu không hợp lệ. Vui lòng kiểm tra cấu hình API hoặc khởi động lại frontend.",
+    );
+  });
+  if (json === null) {
+    throw new Error("API chưa trả về dữ liệu. Vui lòng thử lại.");
+  }
   if (!res.ok || json?.success === false)
     throw new Error(
       json?.message ||
@@ -29,6 +38,12 @@ async function request(path, options = {}) {
   return json;
 }
 export const inventoryApi = {
+  extractCatalog: (entityType, messages, signal) =>
+    request("/catalog/ai-extract", {
+      method: "POST",
+      body: JSON.stringify({ entityType, messages }),
+      signal,
+    }),
   getProductById: (id) => request(`/products/${id}`),
   createProduct: (data) =>
     request("/products", { method: "POST", body: JSON.stringify(data) }),

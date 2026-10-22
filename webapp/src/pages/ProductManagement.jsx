@@ -1,7 +1,11 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { inventoryApi } from "../services/api";
+import CatalogAiChat from "../components/CatalogAiChat";
 
-export default function ProductManagement() {
+export default function ProductManagement({ onDataChange }) {
+  const [aiBusy, setAiBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [modalError, setModalError] = useState("");
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -11,6 +15,47 @@ export default function ProductManagement() {
 
   // Modal State for Add / Edit
   const [modalOpen, setModalOpen] = useState(false);
+  const modalRef = useRef(null);
+  useEffect(() => {
+    if (!modalOpen) return;
+    const previousFocus = document.activeElement;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    (
+      modalRef.current?.querySelector("textarea") ||
+      modalRef.current?.querySelector("input")
+    )?.focus();
+    const key = (event) => {
+      if (event.key === "Escape" && !saving) setModalOpen(false);
+      if (event.key === "Tab") {
+        const nodes = [
+          ...modalRef.current.querySelectorAll(
+            "button:not(:disabled),input:not(:disabled),textarea:not(:disabled)",
+          ),
+        ];
+        if (!nodes.length) {
+          event.preventDefault();
+          return;
+        }
+        if (event.shiftKey && document.activeElement === nodes[0]) {
+          event.preventDefault();
+          nodes[nodes.length - 1].focus();
+        } else if (
+          !event.shiftKey &&
+          document.activeElement === nodes[nodes.length - 1]
+        ) {
+          event.preventDefault();
+          nodes[0].focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", key);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", key);
+      previousFocus?.focus();
+    };
+  }, [modalOpen, saving]);
   const [editingProduct, setEditingProduct] = useState(null);
   const [formData, setFormData] = useState({
     productName: "",
@@ -65,10 +110,11 @@ export default function ProductManagement() {
 
   // Open Add Product Modal
   const handleOpenAdd = () => {
+    setModalError("");
     setEditingProduct(null);
     setFormData({
       productName: "",
-      unit: "box",
+      unit: "",
       stockQuantity: 0,
     });
     setModalOpen(true);
@@ -76,6 +122,7 @@ export default function ProductManagement() {
 
   // Open Edit Product Modal
   const handleOpenEdit = (product) => {
+    setModalError("");
     setEditingProduct(product);
     setFormData({
       productName: product.productName,
@@ -88,17 +135,30 @@ export default function ProductManagement() {
   // Submit Add or Edit Form
   const handleSubmitForm = async (e) => {
     e.preventDefault();
+    if (saving || aiBusy) return;
     if (!formData.productName.trim()) {
-      showFeedback("error", "Product name is required.");
+      setModalError("Vui lòng nhập tên sản phẩm.");
+      return;
+    }
+    if (
+      !formData.unit.trim() ||
+      !Number.isInteger(Number(formData.stockQuantity)) ||
+      Number(formData.stockQuantity) < 0
+    ) {
+      setModalError(
+        "Vui lòng nhập đơn vị tính và số lượng tồn ban đầu là số nguyên không âm.",
+      );
       return;
     }
 
     const payload = {
       productName: formData.productName.trim(),
       unit: formData.unit.trim(),
-      stockQuantity: parseInt(formData.stockQuantity, 10) || 0,
+      stockQuantity: Number(formData.stockQuantity),
     };
 
+    setSaving(true);
+    setModalError("");
     try {
       if (editingProduct) {
         await inventoryApi.updateProduct(editingProduct.productId, payload);
@@ -115,8 +175,11 @@ export default function ProductManagement() {
       }
       setModalOpen(false);
       await fetchProducts();
+      onDataChange?.();
     } catch (err) {
-      showFeedback("error", err.message || "Operation failed.");
+      setModalError(err.message || "Không thể lưu sản phẩm. Vui lòng thử lại.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -537,113 +600,175 @@ export default function ProductManagement() {
 
       {/* Modal: Add / Edit Product */}
       {modalOpen && (
-        <div className="modal-backdrop" onClick={() => setModalOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ marginBottom: 16, color: "var(--text-primary)" }}>
+        <div
+          className="modal-backdrop"
+          onClick={() => {
+            if (!saving) setModalOpen(false);
+          }}
+        >
+          <div
+            className="modal-content"
+            ref={modalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="product-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3
+              id="product-modal-title"
+              style={{ marginBottom: 16, color: "var(--text-primary)" }}
+            >
               {editingProduct
                 ? `Edit Product #${editingProduct.productId}`
                 : "Add New Product"}
             </h3>
-
+            {!editingProduct && (
+              <CatalogAiChat
+                entityType="product"
+                disabled={saving}
+                onBusyChange={setAiBusy}
+                onApply={(result) =>
+                  setFormData((current) => ({
+                    ...current,
+                    ...(result.productName
+                      ? { productName: result.productName }
+                      : {}),
+                    ...(result.unit ? { unit: result.unit } : {}),
+                    ...((Number.isInteger(result.stockQuantity) &&
+                      result.stockQuantity >= 0) ||
+                    result.isComplete
+                      ? { stockQuantity: result.stockQuantity ?? 0 }
+                      : {}),
+                  }))
+                }
+              />
+            )}
             <form onSubmit={handleSubmitForm}>
-              <div style={{ marginBottom: 14 }}>
-                <label
-                  style={{
-                    display: "block",
-                    marginBottom: 6,
-                    fontSize: "0.85rem",
-                    color: "var(--text-secondary)",
-                  }}
-                >
-                  Product Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g., Solar Panel 400W"
-                  value={formData.productName}
-                  onChange={(e) =>
-                    setFormData({ ...formData, productName: e.target.value })
-                  }
-                  style={{ width: "100%" }}
-                />
-              </div>
+              <fieldset disabled={saving || aiBusy}>
+                <div style={{ marginBottom: 14 }}>
+                  <label
+                    style={{
+                      display: "block",
+                      marginBottom: 6,
+                      fontSize: "0.85rem",
+                      color: "var(--text-secondary)",
+                    }}
+                  >
+                    <span id="product-name-label">Product Name *</span>
+                  </label>
+                  <input
+                    type="text"
+                    aria-labelledby="product-name-label"
+                    maxLength={200}
+                    required
+                    placeholder="e.g., Solar Panel 400W"
+                    value={formData.productName}
+                    onChange={(e) =>
+                      setFormData({ ...formData, productName: e.target.value })
+                    }
+                    style={{ width: "100%" }}
+                  />
+                </div>
 
-              <div style={{ marginBottom: 14 }}>
-                <label
-                  style={{
-                    display: "block",
-                    marginBottom: 6,
-                    fontSize: "0.85rem",
-                    color: "var(--text-secondary)",
-                  }}
-                >
-                  Unit of Measure *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g., box, kg, item, pack, roll"
-                  value={formData.unit}
-                  onChange={(e) =>
-                    setFormData({ ...formData, unit: e.target.value })
-                  }
-                  style={{ width: "100%" }}
-                />
-              </div>
+                <div style={{ marginBottom: 14 }}>
+                  <label
+                    style={{
+                      display: "block",
+                      marginBottom: 6,
+                      fontSize: "0.85rem",
+                      color: "var(--text-secondary)",
+                    }}
+                  >
+                    <span id="product-unit-label">Unit of Measure *</span>
+                  </label>
+                  <input
+                    type="text"
+                    aria-labelledby="product-unit-label"
+                    maxLength={50}
+                    required
+                    placeholder="e.g., box, kg, item, pack, roll"
+                    value={formData.unit}
+                    onChange={(e) =>
+                      setFormData({ ...formData, unit: e.target.value })
+                    }
+                    style={{ width: "100%" }}
+                  />
+                </div>
 
-              <div style={{ marginBottom: 20 }}>
-                <label
-                  style={{
-                    display: "block",
-                    marginBottom: 6,
-                    fontSize: "0.85rem",
-                    color: "var(--text-secondary)",
-                  }}
-                >
-                  Current Stock Quantity *
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  required
-                  value={formData.stockQuantity}
-                  onChange={(e) =>
-                    setFormData({ ...formData, stockQuantity: e.target.value })
-                  }
-                  style={{ width: "100%" }}
-                />
-              </div>
+                <div style={{ marginBottom: 20 }}>
+                  <label
+                    style={{
+                      display: "block",
+                      marginBottom: 6,
+                      fontSize: "0.85rem",
+                      color: "var(--text-secondary)",
+                    }}
+                  >
+                    <span id="product-stock-label">
+                      Current Stock Quantity *
+                    </span>
+                  </label>
+                  <input
+                    type="number"
+                    aria-labelledby="product-stock-label"
+                    step="1"
+                    max="2147483647"
+                    min="0"
+                    required
+                    value={formData.stockQuantity}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        stockQuantity: e.target.value,
+                      })
+                    }
+                    style={{ width: "100%" }}
+                  />
+                </div>
 
-              <div
-                style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}
-              >
-                <button
-                  type="button"
-                  onClick={() => setModalOpen(false)}
+                <div
                   style={{
-                    padding: "8px 16px",
-                    background: "#f1f5f9",
-                    color: "var(--text-primary)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 6,
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: 10,
                   }}
                 >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  style={{
-                    padding: "8px 18px",
-                    background: "var(--accent)",
-                    color: "#ffffff",
-                    fontWeight: 600,
-                    borderRadius: 6,
-                  }}
-                >
-                  {editingProduct ? "Save Changes" : "Create Product"}
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    onClick={() => setModalOpen(false)}
+                    style={{
+                      padding: "8px 16px",
+                      background: "#f1f5f9",
+                      color: "var(--text-primary)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 6,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    style={{
+                      padding: "8px 18px",
+                      background: "var(--accent)",
+                      color: "#ffffff",
+                      fontWeight: 600,
+                      borderRadius: 6,
+                    }}
+                  >
+                    {saving
+                      ? "Đang lưu..."
+                      : editingProduct
+                        ? "Save Changes"
+                        : "Create Product"}
+                  </button>
+                </div>
+              </fieldset>
+              {modalError && (
+                <p className="field-error" role="alert">
+                  {modalError}
+                </p>
+              )}
             </form>
           </div>
         </div>

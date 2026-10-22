@@ -15,4 +15,5 @@ public class ConfirmTransactionRequest
     public string? WarehouseName { get; set; }
     public int Quantity { get; set; }
     public string? Unit { get; set; }
+    public bool CreateNewProduct { get; set; }
 }
