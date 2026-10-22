@@ -237,6 +237,9 @@ namespace webAPI.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("WarehouseId"));
 
+                    b.Property<bool>("IsUnallocated")
+                        .HasColumnType("bit");
+
                     b.Property<string>("WarehouseName")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -249,53 +252,90 @@ namespace webAPI.Migrations
                     b.HasData(
                         new
                         {
+                            WarehouseId = -1,
+                            IsUnallocated = true,
+                            WarehouseName = "Kho chờ phân bổ"
+                        },
+                        new
+                        {
                             WarehouseId = 1,
+                            IsUnallocated = false,
                             WarehouseName = "Binh Tan Warehouse"
                         },
                         new
                         {
                             WarehouseId = 2,
+                            IsUnallocated = false,
                             WarehouseName = "Thu Duc Warehouse"
                         },
                         new
                         {
                             WarehouseId = 3,
+                            IsUnallocated = false,
                             WarehouseName = "Tan Binh Warehouse"
                         },
                         new
                         {
                             WarehouseId = 4,
+                            IsUnallocated = false,
                             WarehouseName = "District 7 Central Warehouse"
                         },
                         new
                         {
                             WarehouseId = 5,
+                            IsUnallocated = false,
                             WarehouseName = "Long An Distribution Center"
                         },
                         new
                         {
                             WarehouseId = 6,
+                            IsUnallocated = false,
                             WarehouseName = "Da Nang Transit Hub"
                         },
                         new
                         {
                             WarehouseId = 7,
+                            IsUnallocated = false,
                             WarehouseName = "Bac Ninh High-Tech Warehouse"
                         },
                         new
                         {
                             WarehouseId = 8,
+                            IsUnallocated = false,
                             WarehouseName = "Hai Phong Port Facility"
                         },
                         new
                         {
                             WarehouseId = 9,
+                            IsUnallocated = false,
                             WarehouseName = "Can Tho Regional Depot"
                         },
                         new
                         {
                             WarehouseId = 10,
+                            IsUnallocated = false,
                             WarehouseName = "Dong Nai Logistics Park"
+                        });
+                });
+
+            modelBuilder.Entity("webAPI.Entities.WarehouseStock", b =>
+                {
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("WarehouseId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("int");
+
+                    b.HasKey("ProductId", "WarehouseId");
+
+                    b.HasIndex("WarehouseId");
+
+                    b.ToTable("WarehouseStocks", t =>
+                        {
+                            t.HasCheckConstraint("CK_WarehouseStocks_Quantity", "[Quantity] >= 0");
                         });
                 });
 
@@ -310,7 +350,7 @@ namespace webAPI.Migrations
                     b.HasOne("webAPI.Entities.Supplier", "Supplier")
                         .WithMany("InventoryTransactions")
                         .HasForeignKey("SupplierId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("webAPI.Entities.Warehouse", "Warehouse")
                         .WithMany("InventoryTransactions")
@@ -325,9 +365,30 @@ namespace webAPI.Migrations
                     b.Navigation("Warehouse");
                 });
 
+            modelBuilder.Entity("webAPI.Entities.WarehouseStock", b =>
+                {
+                    b.HasOne("webAPI.Entities.Product", "Product")
+                        .WithMany("WarehouseStocks")
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("webAPI.Entities.Warehouse", "Warehouse")
+                        .WithMany("WarehouseStocks")
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Product");
+
+                    b.Navigation("Warehouse");
+                });
+
             modelBuilder.Entity("webAPI.Entities.Product", b =>
                 {
                     b.Navigation("InventoryTransactions");
+
+                    b.Navigation("WarehouseStocks");
                 });
 
             modelBuilder.Entity("webAPI.Entities.Supplier", b =>
@@ -338,6 +399,8 @@ namespace webAPI.Migrations
             modelBuilder.Entity("webAPI.Entities.Warehouse", b =>
                 {
                     b.Navigation("InventoryTransactions");
+
+                    b.Navigation("WarehouseStocks");
                 });
 #pragma warning restore 612, 618
         }

@@ -134,3 +134,9 @@ Access React UI at: `http://localhost:5173`.
 See [TASK_REVIEW.md](TASK_REVIEW.md) for task status, integration checks, UI checks, and current data scope.
 
 Local API credentials can be set with DEEPSEEK_API_KEY or the ignored webAPI/appsettings.Local.json file. The API model is deepseek-flash. Vite proxies /api to localhost:5000; configure VITE_API_BASE_URL when deploying separately.
+
+## Warehouse inventory upgrade
+
+Receipts now require a supplier and a receiving warehouse. Outbound dispatches carry no supplier. Product and Warehouse pages expose per-warehouse balances, and dispatch shortages suggest a multi-warehouse plan that requires explicit consent before saving.
+
+Apply migrations with `dotnet ef database update --project webAPI/webAPI.csproj`. Existing aggregate stock is preserved in **Kho chờ phân bổ**. Allocate it to the actual location from the Warehouse page before dispatching. Positive initial stock on a new product requires a supplier and warehouse and is recorded as a receipt. See [TASK_REVIEW.md](TASK_REVIEW.md) for API details and verification.

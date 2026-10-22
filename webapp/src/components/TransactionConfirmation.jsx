@@ -1,5 +1,7 @@
-﻿import React, { useState } from "react";
+﻿import React, { useEffect, useState } from "react";
 import Icon from "./Icon";
+import { inventoryApi } from "../services/api";
+
 export default function TransactionConfirmation({
   extractedData,
   onConfirm,
@@ -9,8 +11,23 @@ export default function TransactionConfirmation({
   warehouses = [],
   suppliers = [],
 }) {
-  const [form, setForm] = useState(extractedData);
-  const [createNewProduct, setCreateNewProduct] = useState(false);
+  const [form, setForm] = useState(extractedData),
+    [createNewProduct, setCreateNewProduct] = useState(false);
+  const [plan, setPlan] = useState(null),
+    [planLoading, setPlanLoading] = useState(false),
+    [planError, setPlanError] = useState(""),
+    [usePlan, setUsePlan] = useState(false);
+  const [newSupplier, setNewSupplier] = useState(false),
+    [supplierName, setSupplierName] = useState(""),
+    [createdSuppliers, setCreatedSuppliers] = useState([]),
+    [supplierBusy, setSupplierBusy] = useState(false),
+    [supplierError, setSupplierError] = useState("");
+  const supplierList = [
+    ...suppliers,
+    ...createdSuppliers.filter(
+      (s) => !suppliers.some((x) => x.supplierId === s.supplierId),
+    ),
+  ];
   const product = products.find(
     (p) =>
       p.productId === Number(form.productId) ||
@@ -20,63 +37,151 @@ export default function TransactionConfirmation({
   );
   const warehouse = warehouses.find(
     (w) =>
-      w.warehouseId === Number(form.warehouseId) ||
-      (!form.warehouseId &&
-        w.warehouseName.toLowerCase() ===
-          (form.warehouseName || "").trim().toLowerCase()),
+      !w.isUnallocated &&
+      (w.warehouseId === Number(form.warehouseId) ||
+        (!form.warehouseId &&
+          w.warehouseName.toLowerCase() ===
+            (form.warehouseName || "").trim().toLowerCase())),
   );
-  const supplier = suppliers.find(
+  const supplier = supplierList.find(
     (s) =>
       s.supplierId === Number(form.supplierId) ||
       (!form.supplierId &&
         s.supplierName.toLowerCase() ===
           (form.supplierName || "").trim().toLowerCase()),
   );
-  const qty = Number(form.quantity);
-  const isDispatch = form.transactionType === "Dispatch";
-  const isReceive = form.transactionType === "Receive";
-  const validType = ["Receive", "Dispatch"].includes(form.transactionType);
-  const insufficient = isDispatch && product && qty > product.stockQuantity;
+  const qty = Number(form.quantity),
+    isDispatch = form.transactionType === "Dispatch",
+    isReceive = form.transactionType === "Receive";
+  const missingProduct = !product && !!form.productName?.trim(),
+    creatingProduct = isReceive && !product && createNewProduct;
   const wrongUnit =
     product &&
     form.unit &&
     form.unit.trim().toLowerCase() !== product.unit.toLowerCase();
-  const unknownSupplier = (form.supplierId || form.supplierName) && !supplier;
-  const missingProduct = !product && !!form.productName?.trim();
-  const creatingProduct = isReceive && !product && createNewProduct;
-  const newProductValid =
-    creatingProduct &&
-    form.productName?.trim() &&
-    form.productName.trim().length <= 200 &&
-    form.unit?.trim() &&
-    form.unit.trim().length <= 50;
-  const previewProduct =
-    product ||
-    (creatingProduct ? { stockQuantity: 0, unit: form.unit || "" } : null);
+  const currentPlan =
+    plan &&
+    plan.productId === product?.productId &&
+    plan.warehouseId === warehouse?.warehouseId &&
+    plan.requestedQuantity === qty
+      ? plan
+      : null;
+  const localStock =
+    product?.warehouseStocks?.find(
+      (s) => s.warehouseId === warehouse?.warehouseId,
+    )?.quantity ?? 0;
+  const available = currentPlan?.availableQuantity ?? localStock;
+  const insufficient = isDispatch && product && warehouse && qty > available;
+  const acceptedPlan = !!(usePlan && currentPlan?.canFulfill);
   const valid =
-    validType &&
-    (product || newProductValid) &&
+    (isReceive || isDispatch) &&
+    (product ||
+      (creatingProduct &&
+        form.productName?.trim() &&
+        form.productName.trim().length <= 200 &&
+        form.unit?.trim() &&
+        form.unit.trim().length <= 50)) &&
     warehouse &&
     Number.isInteger(qty) &&
     qty > 0 &&
     qty <= 2147483647 &&
-    !insufficient &&
     !wrongUnit &&
-    !unknownSupplier;
-  const update = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
-  const submit = (e) => {
+    !supplierBusy &&
+    (!isReceive || !!supplier) &&
+    (!isDispatch ||
+      (!planLoading &&
+        !planError &&
+        !!currentPlan &&
+        (!insufficient || acceptedPlan)));
+  useEffect(() => {
+    setPlan(null);
+    setUsePlan(false);
+    setPlanError("");
+    setPlanLoading(false);
+    if (
+      !isDispatch ||
+      !product ||
+      !warehouse ||
+      !Number.isInteger(qty) ||
+      qty <= 0 ||
+      qty > 2147483647
+    )
+      return;
+    const controller = new AbortController();
+    setPlanLoading(true);
+    const timer = setTimeout(
+      () =>
+        inventoryApi
+          .getDispatchOptions(
+            product.productId,
+            warehouse.warehouseId,
+            qty,
+            controller.signal,
+          )
+          .then(setPlan)
+          .catch((e) => {
+            if (!controller.signal.aborted) setPlanError(e.message);
+          })
+          .finally(() => {
+            if (!controller.signal.aborted) setPlanLoading(false);
+          }),
+      200,
+    );
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [isDispatch, product?.productId, warehouse?.warehouseId, qty]);
+  const update = (key, value) => setForm((f) => ({ ...f, [key]: value }));
+  const addSupplier = async () => {
+    if (!supplierName.trim() || supplierBusy) return;
+    setSupplierBusy(true);
+    setSupplierError("");
+    try {
+      const existing = supplierList.find(
+        (s) =>
+          s.supplierName.toLowerCase() === supplierName.trim().toLowerCase(),
+      );
+      const added =
+        existing ||
+        (await inventoryApi.createSupplier({
+          supplierName: supplierName.trim(),
+        }));
+      if (!existing) setCreatedSuppliers((list) => [...list, added]);
+      setForm((f) => ({
+        ...f,
+        supplierId: added.supplierId,
+        supplierName: added.supplierName,
+      }));
+      setNewSupplier(false);
+      setSupplierName("");
+    } catch (e) {
+      setSupplierError(e.message);
+    } finally {
+      setSupplierBusy(false);
+    }
+  };
+  const submit = async (e) => {
     e.preventDefault();
     if (!valid || isSubmitting) return;
-    onConfirm({
+    const error = await onConfirm({
       transactionType: form.transactionType,
       productId: product?.productId || null,
       productName: product?.productName || form.productName.trim(),
       createNewProduct: !!creatingProduct,
       warehouseId: warehouse.warehouseId,
-      supplierId: supplier?.supplierId || null,
+      supplierId: isReceive ? supplier.supplierId : null,
       quantity: qty,
       unit: product?.unit || form.unit.trim(),
+      confirmAdditionalDispatches: acceptedPlan,
+      dispatchAllocations: acceptedPlan
+        ? currentPlan.suggestedAllocations
+        : null,
     });
+    if (error?.dispatchOptions) {
+      setPlan(error.dispatchOptions);
+      setUsePlan(false);
+    }
   };
   return (
     <section className="card review-card">
@@ -88,7 +193,10 @@ export default function TransactionConfirmation({
           <div>
             <h2 className="card-title">Kiểm tra & xác nhận</h2>
             <p className="card-subtitle">
-              Kiểm tra các trường bên dưới. Tồn kho chưa thay đổi.
+              {isDispatch
+                ? "Xuất từ kho ra ngoài · Không có nhà cung cấp"
+                : "Nhập từ nhà cung cấp vào kho"}
+              . Chưa thay đổi tồn kho.
             </p>
           </div>
         </div>
@@ -103,7 +211,7 @@ export default function TransactionConfirmation({
             <strong>Sản phẩm không tồn tại</strong>
             <p>
               “{form.productName}” chưa có trong danh mục. Không thể xuất kho
-              sản phẩm này. Vui lòng chọn sản phẩm có sẵn.
+              sản phẩm này.
             </p>
           </div>
         </div>
@@ -149,31 +257,32 @@ export default function TransactionConfirmation({
           <div>
             <strong>Tạo sản phẩm mới & nhập kho</strong>
             <p>
-              Kiểm tra tên, đơn vị và số lượng. Sản phẩm chỉ được tạo khi bạn
-              bấm xác nhận bên dưới.
+              Sản phẩm chỉ được tạo cùng đơn nhập từ nhà cung cấp khi xác nhận
+              cuối.
             </p>
           </div>
         </div>
       )}
       <form onSubmit={submit}>
-        <fieldset disabled={isSubmitting}>
+        <fieldset disabled={isSubmitting || supplierBusy}>
           <div className="form-grid">
             <div className="form-field">
               <label htmlFor="review-type">Loại giao dịch *</label>
               <select
                 id="review-type"
                 value={form.transactionType || ""}
+                required
                 onChange={(e) => {
                   update("transactionType", e.target.value);
                   setCreateNewProduct(false);
+                  setNewSupplier(false);
                 }}
-                required
               >
                 <option value="" disabled>
                   Chọn loại giao dịch
                 </option>
-                <option value="Receive">Nhập kho</option>
-                <option value="Dispatch">Xuất kho</option>
+                <option value="Receive">Nhập từ nhà cung cấp</option>
+                <option value="Dispatch">Xuất từ kho ra ngoài</option>
               </select>
             </div>
             <div className="form-field">
@@ -198,7 +307,7 @@ export default function TransactionConfirmation({
                   }
                   setCreateNewProduct(false);
                   const p = products.find(
-                    (x) => x.productId === Number(e.target.value),
+                    (p) => p.productId === Number(e.target.value),
                   );
                   setForm((f) => ({
                     ...f,
@@ -242,19 +351,20 @@ export default function TransactionConfirmation({
                       productName: e.target.value,
                     }))
                   }
-                  placeholder="Nhập tên sản phẩm mới"
                 />
               </div>
             )}
             <div className="form-field">
-              <label htmlFor="review-warehouse">Kho hàng *</label>
+              <label htmlFor="review-warehouse">
+                {isDispatch ? "Kho xuất *" : "Kho nhận *"}
+              </label>
               <select
                 id="review-warehouse"
                 value={warehouse?.warehouseId || ""}
                 required
                 onChange={(e) => {
                   const w = warehouses.find(
-                    (x) => x.warehouseId === Number(e.target.value),
+                    (w) => w.warehouseId === Number(e.target.value),
                   );
                   setForm((f) => ({
                     ...f,
@@ -264,15 +374,15 @@ export default function TransactionConfirmation({
                 }}
               >
                 <option value="" disabled>
-                  {form.warehouseName
-                    ? `${form.warehouseName} — cần chọn lại`
-                    : "Chọn kho hàng"}
+                  Chọn kho thực tế
                 </option>
-                {warehouses.map((w) => (
-                  <option key={w.warehouseId} value={w.warehouseId}>
-                    {w.warehouseName}
-                  </option>
-                ))}
+                {warehouses
+                  .filter((w) => !w.isUnallocated)
+                  .map((w) => (
+                    <option key={w.warehouseId} value={w.warehouseId}>
+                      {w.warehouseName}
+                    </option>
+                  ))}
               </select>
             </div>
             <div className="form-field">
@@ -285,8 +395,8 @@ export default function TransactionConfirmation({
                 step="1"
                 required
                 value={form.quantity ?? ""}
+                aria-invalid={!!(insufficient && !acceptedPlan)}
                 onChange={(e) => update("quantity", e.target.value)}
-                aria-invalid={insufficient || undefined}
               />
             </div>
             <div className="form-field">
@@ -298,56 +408,92 @@ export default function TransactionConfirmation({
                 maxLength={50}
                 value={product?.unit || form.unit || ""}
                 onChange={(e) => update("unit", e.target.value)}
-                placeholder={
-                  creatingProduct
-                    ? "Ví dụ: box, kg, cái"
-                    : "Chọn sản phẩm để xem đơn vị"
-                }
+                placeholder="Đơn vị sản phẩm"
               />
-              <small>
-                {creatingProduct
-                  ? "Đơn vị này sẽ được lưu cho sản phẩm mới."
-                  : "Theo đơn vị chuẩn của sản phẩm."}
-              </small>
             </div>
-            <div className="form-field">
-              <label htmlFor="review-supplier">
-                Nhà cung cấp <span>Tùy chọn</span>
-              </label>
-              <select
-                id="review-supplier"
-                value={supplier?.supplierId || ""}
-                onChange={(e) => {
-                  const s = suppliers.find(
-                    (x) => x.supplierId === Number(e.target.value),
-                  );
-                  setForm((f) => ({
-                    ...f,
-                    supplierId: s?.supplierId || null,
-                    supplierName: s?.supplierName || null,
-                  }));
-                }}
-              >
-                <option value="">
-                  {unknownSupplier
-                    ? `${form.supplierName || "Không tìm thấy"} — chọn lại hoặc bỏ trống`
-                    : "Không có nhà cung cấp"}
-                </option>
-                {suppliers.map((s) => (
-                  <option key={s.supplierId} value={s.supplierId}>
-                    {s.supplierName}
+            {isReceive && (
+              <div className="form-field">
+                <label htmlFor="review-supplier">Nhập từ nhà cung cấp *</label>
+                <select
+                  id="review-supplier"
+                  required
+                  value={supplier?.supplierId || ""}
+                  onChange={(e) => {
+                    const s = supplierList.find(
+                      (s) => s.supplierId === Number(e.target.value),
+                    );
+                    setForm((f) => ({
+                      ...f,
+                      supplierId: s?.supplierId || null,
+                      supplierName: s?.supplierName || null,
+                    }));
+                  }}
+                >
+                  <option value="">
+                    {form.supplierName && !supplier
+                      ? `${form.supplierName} — chưa có, hãy thêm mới`
+                      : "Chọn nhà cung cấp"}
                   </option>
-                ))}
-              </select>
-            </div>
+                  {supplierList.map((s) => (
+                    <option key={s.supplierId} value={s.supplierId}>
+                      {s.supplierName}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => {
+                    setNewSupplier(!newSupplier);
+                    setSupplierName(form.supplierName || "");
+                  }}
+                >
+                  + Thêm nhà cung cấp
+                </button>
+              </div>
+            )}
           </div>
         </fieldset>
+        {isReceive && newSupplier && (
+          <div className="inline-supplier">
+            <label htmlFor="quick-supplier-name">Tên nhà cung cấp mới</label>
+            <div>
+              <input
+                id="quick-supplier-name"
+                maxLength={200}
+                value={supplierName}
+                disabled={supplierBusy || isSubmitting}
+                onChange={(e) => setSupplierName(e.target.value)}
+                placeholder="Ví dụ: Công ty An Phát"
+              />
+              <button
+                type="button"
+                className="btn btn-outline"
+                disabled={!supplierName.trim() || supplierBusy || isSubmitting}
+                onClick={addSupplier}
+              >
+                {supplierBusy ? "Đang thêm..." : "Thêm & chọn"}
+              </button>
+            </div>
+            {supplierError && (
+              <p className="field-error" role="alert">
+                {supplierError}
+              </p>
+            )}
+            <small>
+              Nhà cung cấp được thêm vào danh mục; đơn nhập vẫn chờ xác nhận.
+            </small>
+          </div>
+        )}
+        {isReceive && !supplier && (
+          <p className="field-error" role="alert">
+            Vui lòng chọn nhà cung cấp để nhập hàng vào kho.
+          </p>
+        )}
         {wrongUnit && (
           <div className="alert alert-warning" role="alert">
-            <Icon name="alert" />
-            <div>
-              Đơn vị AI trích xuất là “{form.unit}”, khác đơn vị chuẩn “
-              {product.unit}”.{" "}
+            <span>
+              Đơn vị phải là {product.unit}.{" "}
               <button
                 type="button"
                 className="text-button"
@@ -356,81 +502,179 @@ export default function TransactionConfirmation({
               >
                 Dùng đơn vị {product.unit}
               </button>
-            </div>
+            </span>
           </div>
         )}
-        {unknownSupplier && (
-          <p className="field-error" role="alert">
-            Nhà cung cấp chưa có trong danh mục. Vui lòng chọn lại hoặc bỏ
-            trống.
+        {planLoading && (
+          <p className="stock-plan-status" role="status">
+            <span className="spinner" /> Đang kiểm tra tồn tại từng kho...
           </p>
         )}
-        {previewProduct && validType && (
-          <div className={`stock-preview ${insufficient ? "invalid" : ""}`}>
+        {planError && (
+          <div className="alert alert-error" role="alert">
+            {planError} Thay đổi kho hoặc số lượng để kiểm tra lại.
+          </div>
+        )}
+        {(product || creatingProduct) && warehouse && (
+          <div
+            className={`stock-preview ${insufficient && !acceptedPlan ? "invalid" : ""}`}
+          >
             <div>
-              <small>TỒN HIỆN TẠI · TOÀN HỆ THỐNG</small>
+              <small>TỒN TẠI {warehouse.warehouseName}</small>
               <strong>
-                {previewProduct.stockQuantity.toLocaleString("vi-VN")}{" "}
-                <span>{previewProduct.unit}</span>
+                {available.toLocaleString("vi-VN")}{" "}
+                <span>{product?.unit || form.unit}</span>
               </strong>
             </div>
             <Icon name="arrow" />
             <div>
-              <small>{isDispatch ? "XUẤT KHO" : "NHẬP KHO"}</small>
-              <strong className={isDispatch ? "text-warning" : "text-success"}>
-                {isDispatch ? "−" : "+"}
+              <small>{isDispatch ? "YÊU CẦU XUẤT" : "NHẬP VÀO KHO"}</small>
+              <strong>
                 {Number.isFinite(qty) ? qty.toLocaleString("vi-VN") : "—"}{" "}
-                <span>{previewProduct.unit}</span>
+                <span>{product?.unit || form.unit}</span>
               </strong>
             </div>
-            <Icon name="arrow" />
             <div>
-              <small>DỰ KIẾN SAU GIAO DỊCH</small>
-              <strong>
-                {Number.isFinite(qty)
-                  ? (
-                      previewProduct.stockQuantity + (isDispatch ? -qty : qty)
-                    ).toLocaleString("vi-VN")
-                  : "—"}{" "}
-                <span>{previewProduct.unit}</span>
-              </strong>
+              <small>TỔNG TỒN SẢN PHẨM</small>
+              <strong>{product?.stockQuantity ?? 0}</strong>
             </div>
           </div>
         )}
-        {insufficient && (
-          <p className="field-error" role="alert">
-            Tồn kho không đủ. Vui lòng giảm số lượng xuất hoặc chọn sản phẩm
-            khác.
-          </p>
+        {isDispatch && currentPlan?.shortageQuantity > 0 && (
+          <section
+            className="dispatch-suggestions"
+            aria-label="Gợi ý xuất từ kho khác"
+          >
+            <div className="alert alert-warning" role="alert">
+              <Icon name="alert" />
+              <div>
+                <strong>Kho đã chọn không đủ hàng</strong>
+                <p>{currentPlan.message}</p>
+              </div>
+            </div>
+            {currentPlan.alternatives.length > 0 && (
+              <div className="table-responsive">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>KHO CÒN HÀNG</th>
+                      <th>TỒN</th>
+                      <th>ĐỀ XUẤT</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {currentPlan.alternatives.map((s) => (
+                      <tr key={s.warehouseId}>
+                        <td>{s.warehouseName}</td>
+                        <td>
+                          {s.quantity} {s.unit}
+                        </td>
+                        <td>
+                          {s.quantity >= qty && (
+                            <button
+                              type="button"
+                              className="btn btn-outline"
+                              disabled={isSubmitting}
+                              onClick={() =>
+                                setForm((f) => ({
+                                  ...f,
+                                  warehouseId: s.warehouseId,
+                                  warehouseName: s.warehouseName,
+                                }))
+                              }
+                            >
+                              Xuất toàn bộ từ kho này
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {currentPlan.canFulfill && !usePlan && (
+              <div className="new-product-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={isSubmitting}
+                  onClick={() => setUsePlan(true)}
+                >
+                  Có, tạo kế hoạch xuất từ các kho còn hàng
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  disabled={isSubmitting}
+                  onClick={() => {
+                    setUsePlan(false);
+                    update("quantity", available);
+                  }}
+                >
+                  Không, chỉ xuất số có tại kho đã chọn
+                </button>
+              </div>
+            )}
+            {acceptedPlan && (
+              <div className="accepted-dispatch-plan">
+                <strong>
+                  Đã đồng ý kế hoạch — {currentPlan.suggestedAllocations.length}{" "}
+                  đơn xuất, tổng {qty} {product.unit}
+                </strong>
+                <ul>
+                  {currentPlan.suggestedAllocations.map((a) => (
+                    <li key={a.warehouseId}>
+                      {warehouses.find((w) => w.warehouseId === a.warehouseId)
+                        ?.warehouseName || a.warehouseId}
+                      :{" "}
+                      <strong>
+                        {a.quantity} {product.unit}
+                      </strong>
+                    </li>
+                  ))}
+                </ul>
+                <p>
+                  Chưa lưu đơn nào. Bấm xác nhận bên dưới để lưu toàn bộ cùng
+                  lúc.
+                </p>
+                <button
+                  type="button"
+                  className="text-button"
+                  disabled={isSubmitting}
+                  onClick={() => setUsePlan(false)}
+                >
+                  Hủy kế hoạch bổ sung
+                </button>
+              </div>
+            )}
+          </section>
         )}
         <div className="review-actions">
           <p>
-            <Icon name="check" size={16} /> Tồn kho và lịch sử được lưu cùng
-            lúc.
+            <Icon name="check" size={16} /> Tồn từng kho và lịch sử được lưu
+            cùng lúc.
           </p>
           <button
             type="button"
-            onClick={onCancel}
-            disabled={isSubmitting}
             className="btn btn-outline"
+            disabled={isSubmitting}
+            onClick={onCancel}
           >
             Hủy giao dịch
           </button>
           <button
             type="submit"
-            disabled={!valid || isSubmitting}
             className="btn btn-primary"
+            disabled={!valid || isSubmitting}
           >
-            {isSubmitting ? (
-              <span className="spinner" />
-            ) : (
-              <Icon name="check" size={17} />
-            )}{" "}
             {isSubmitting
               ? "Đang lưu..."
               : creatingProduct
                 ? "Xác nhận tạo sản phẩm & nhập kho"
-                : "Xác nhận & lưu giao dịch"}
+                : acceptedPlan
+                  ? `Xác nhận ${currentPlan.suggestedAllocations.length} đơn xuất`
+                  : "Xác nhận & lưu giao dịch"}
           </button>
         </div>
       </form>

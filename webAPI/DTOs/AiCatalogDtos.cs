@@ -21,6 +21,7 @@ public class AiCatalogResult
     public string? Unit { get; set; }
     public int? StockQuantity { get; set; }
     public string? WarehouseName { get; set; }
+    public string? SupplierName { get; set; }
     public bool IsAmbiguous { get; set; }
     public bool IsComplete { get; set; }
     public bool AlreadyExists { get; set; }

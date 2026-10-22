@@ -1,10 +1,11 @@
-﻿import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import Navbar from "./components/Navbar";
 import Icon from "./components/Icon";
 import Dashboard from "./pages/Dashboard";
 import AiInventoryEntry from "./pages/AiInventoryEntry";
 import ProductManagement from "./pages/ProductManagement";
 import WarehouseManagement from "./pages/WarehouseManagement";
+import SuppliersManagement from "./pages/SuppliersManagement";
 import TransactionHistory from "./pages/TransactionHistory";
 import { inventoryApi } from "./services/api";
 const pages = {
@@ -12,6 +13,7 @@ const pages = {
   "ai-entry": ["Nhập / xuất kho", "Vận hành kho"],
   products: ["Sản phẩm", "Quản lý danh mục"],
   warehouses: ["Kho hàng", "Quản lý danh mục"],
+  suppliers: ["Nhà cung cấp", "Quản lý danh mục"],
   history: ["Lịch sử giao dịch", "Theo dõi & báo cáo"],
 };
 function stored(key, fallback) {
@@ -32,9 +34,7 @@ export default function App() {
     }),
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
-  const [selectedId, setSelectedId] = useState(null),
-    [playing, setPlaying] = useState(false),
-    [elapsed, setElapsed] = useState(0);
+  const [selectedId, setSelectedId] = useState(null);
   const [favorites, setFavorites] = useState(() =>
       stored("stockflow-favorites", []),
     ),
@@ -79,34 +79,7 @@ export default function App() {
   const { products, warehouses, history } = catalog;
   const selected =
     products.find((p) => p.productId === selectedId) || products[0];
-  const index = selected
-    ? products.findIndex((p) => p.productId === selected.productId)
-    : 0;
-  const select = (p) => {
-    setSelectedId(p.productId);
-    setElapsed(0);
-  };
-  const move = (direction) => {
-    if (products.length) {
-      setSelectedId(
-        products[(index + direction + products.length) % products.length]
-          .productId,
-      );
-      setElapsed(0);
-    }
-  };
-  useEffect(() => {
-    if (!playing || products.length < 2) return;
-    const timer = setInterval(() => setElapsed((value) => value + 1), 1000);
-    return () => clearInterval(timer);
-  }, [playing, products.length]);
-  useEffect(() => {
-    if (elapsed >= 8) {
-      setSelectedId(products[(index + 1) % products.length]?.productId);
-      setElapsed(0);
-    }
-  }, [elapsed, index, products]);
-  const next = products[(index + 1) % Math.max(products.length, 1)];
+  const select = (p) => setSelectedId(p.productId);
   const low = products.filter((p) => p.stockQuantity <= 10);
   const toggleFavorite = (id) =>
     setFavorites((values) =>
@@ -252,6 +225,9 @@ export default function App() {
             {activeTab === "products" && (
               <ProductManagement onDataChange={load} />
             )}
+            {activeTab === "suppliers" && (
+              <SuppliersManagement onDataChange={load} />
+            )}
             {activeTab === "warehouses" && (
               <WarehouseManagement onDataChange={load} />
             )}{" "}
@@ -309,7 +285,9 @@ export default function App() {
                 <p>
                   Điểm kho đang quản lý
                   <strong>
-                    {loading ? "—" : warehouses.length}
+                    {loading
+                      ? "—"
+                      : warehouses.filter((w) => !w.isUnallocated).length}
                     <small> kho hàng</small>
                   </strong>
                 </p>
@@ -368,94 +346,6 @@ export default function App() {
           </aside>
         </div>
       </div>
-      <footer className="bottom-bar" aria-label="Duyệt nhanh sản phẩm">
-        <div className="now-selected">
-          <img src="/product.svg" alt="" />
-          <div>
-            <strong>{selected?.productName || "Chưa có sản phẩm"}</strong>
-            <small>
-              {selected
-                ? `${selected.stockQuantity} ${selected.unit} hiện có`
-                : "Danh mục sản phẩm"}
-            </small>
-          </div>
-          {selected && (
-            <button
-              className={`icon-button favorite ${favorites.includes(selected.productId) ? "is-favorite" : ""}`}
-              aria-label="Đánh dấu sản phẩm đang chọn"
-              aria-pressed={favorites.includes(selected.productId)}
-              onClick={() => toggleFavorite(selected.productId)}
-            >
-              <Icon name="heart" size={16} />
-            </button>
-          )}
-        </div>
-        <div className="browse-player">
-          <div className="player-controls">
-            <button
-              className="icon-button"
-              onClick={() => move(-1)}
-              disabled={!products.length}
-              aria-label="Sản phẩm trước"
-            >
-              <Icon name="previous" size={17} />
-            </button>
-            <button
-              className="play-button"
-              disabled={products.length < 2}
-              onClick={() => setPlaying(!playing)}
-              aria-label={
-                playing ? "Dừng duyệt tự động" : "Tự động duyệt sản phẩm"
-              }
-              title={
-                playing
-                  ? "Dừng duyệt tự động"
-                  : "Tự động duyệt, mỗi sản phẩm 8 giây"
-              }
-            >
-              <Icon name={playing ? "pause" : "play"} size={16} />
-            </button>
-            <button
-              className="icon-button"
-              onClick={() => move(1)}
-              disabled={!products.length}
-              aria-label="Sản phẩm tiếp theo"
-            >
-              <Icon name="next" size={17} />
-            </button>
-          </div>
-          <div className="player-progress">
-            <span>
-              {products.length ? String(index + 1).padStart(2, "0") : "00"}
-            </span>
-            <input
-              type="range"
-              min="0"
-              max={Math.max(products.length - 1, 1)}
-              value={index}
-              disabled={products.length < 2}
-              onChange={(e) => select(products[Number(e.target.value)])}
-              aria-label="Chọn vị trí sản phẩm"
-              style={{
-                "--progress": `${products.length > 1 ? (index / (products.length - 1)) * 100 : 0}%`,
-              }}
-            />
-            <span>{String(products.length).padStart(2, "0")}</span>
-          </div>
-        </div>
-        <div className="up-next">
-          <span>TIẾP THEO</span>
-          <strong>{next?.productName || "—"}</strong>
-          <button
-            className="icon-button"
-            onClick={() => move(1)}
-            disabled={!products.length}
-            aria-label="Chọn sản phẩm tiếp theo"
-          >
-            <Icon name="arrow" size={19} />
-          </button>
-        </div>
-      </footer>
     </div>
   );
 }

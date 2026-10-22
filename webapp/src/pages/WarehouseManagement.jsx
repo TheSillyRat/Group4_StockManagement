@@ -1,28 +1,52 @@
 ﻿import React, { useEffect, useState, useRef } from "react";
 import { inventoryApi } from "../services/api";
 import Icon from "../components/Icon";
-import { Metric, Search, Empty, Pagination } from "../components/DataUI";
 import CatalogAiChat from "../components/CatalogAiChat";
+import { Metric, Search, Empty, Pagination } from "../components/DataUI";
 export default function WarehouseManagement({ onDataChange }) {
-  const [aiBusy, setAiBusy] = useState(false);
   const [warehouses, setWarehouses] = useState([]),
     [loading, setLoading] = useState(true),
-    [notice, setNotice] = useState(null),
+    [error, setError] = useState(""),
+    [notice, setNotice] = useState(""),
     [search, setSearch] = useState(""),
     [page, setPage] = useState(1),
-    [modal, setModal] = useState(null),
+    [selected, setSelected] = useState(null),
+    [stocks, setStocks] = useState([]),
+    [stockLoading, setStockLoading] = useState(false),
+    [stockError, setStockError] = useState("");
+  const [modal, setModal] = useState(null),
     [name, setName] = useState(""),
-    [submitting, setSubmitting] = useState(false),
-    [formError, setFormError] = useState("");
-  const dialogRef = useRef(null),
-    returnFocus = useRef(null);
+    [busy, setBusy] = useState(false),
+    [aiBusy, setAiBusy] = useState(false),
+    [toWarehouse, setToWarehouse] = useState(""),
+    [quantity, setQuantity] = useState(1);
+  const dialog = useRef(null);
+  const loadStock = async (id) => {
+    setStockLoading(true);
+    setStockError("");
+    try {
+      setStocks(await inventoryApi.getWarehouseStock(id));
+    } catch (e) {
+      setStocks([]);
+      setStockError(e.message);
+    } finally {
+      setStockLoading(false);
+    }
+  };
   const load = async () => {
     setLoading(true);
+    setError("");
     try {
-      setWarehouses(await inventoryApi.getWarehouses());
-      setPage(1);
+      const rows = await inventoryApi.getWarehouses();
+      setWarehouses(rows);
+      if (selected) {
+        setSelected(
+          rows.find((w) => w.warehouseId === selected.warehouseId) || null,
+        );
+        await loadStock(selected.warehouseId);
+      }
     } catch (e) {
-      setNotice({ type: "error", text: e.message });
+      setError(e.message);
     } finally {
       setLoading(false);
     }
@@ -32,77 +56,84 @@ export default function WarehouseManagement({ onDataChange }) {
   }, []);
   useEffect(() => {
     if (!modal) return;
-    returnFocus.current = document.activeElement;
-    const previousOverflow = document.body.style.overflow;
+    const focus = document.activeElement,
+      overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    dialogRef.current?.querySelector("input, button")?.focus();
+    (
+      dialog.current?.querySelector("textarea") ||
+      dialog.current?.querySelector("input,select,button")
+    )?.focus();
     const key = (e) => {
-      if (e.key === "Escape" && !submitting) setModal(null);
+      if (e.key === "Escape" && !busy) setModal(null);
       if (e.key === "Tab") {
-        const els = [
-          ...dialogRef.current.querySelectorAll(
-            "button:not(:disabled),input:not(:disabled),textarea:not(:disabled)",
+        const nodes = [
+          ...dialog.current.querySelectorAll(
+            "button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled)",
           ),
         ];
-        if (!els.length) {
+        if (!nodes.length) {
           e.preventDefault();
           return;
         }
-        const first = els[0],
-          last = els[els.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
+        if (e.shiftKey && document.activeElement === nodes[0]) {
           e.preventDefault();
-          last.focus();
-        }
-        if (!e.shiftKey && document.activeElement === last) {
+          nodes.at(-1).focus();
+        } else if (!e.shiftKey && document.activeElement === nodes.at(-1)) {
           e.preventDefault();
-          first.focus();
+          nodes[0].focus();
         }
       }
     };
     document.addEventListener("keydown", key);
     return () => {
-      document.body.style.overflow = previousOverflow;
+      document.body.style.overflow = overflow;
       document.removeEventListener("keydown", key);
-      returnFocus.current?.focus();
+      focus?.focus();
     };
-  }, [modal, submitting]);
-  const open = (value) => {
-    setModal(value);
-    setFormError("");
-    setName(value.warehouseName || "");
+  }, [modal, busy]);
+  const open = (m) => {
+    setModal(m);
+    setError("");
+    setName(m.warehouseName || "");
+    setToWarehouse("");
+    setQuantity(1);
   };
   const save = async (e) => {
     e.preventDefault();
-    if (submitting || aiBusy) return;
-    setSubmitting(true);
-    setFormError("");
+    if (busy || aiBusy) return;
+    setBusy(true);
+    setError("");
     try {
-      if (modal.mode === "delete")
+      if (modal.mode === "transfer")
+        await inventoryApi.transferStock({
+          productId: modal.productId,
+          fromWarehouseId: selected.warehouseId,
+          toWarehouseId: Number(toWarehouse),
+          quantity: Number(quantity),
+        });
+      else if (modal.mode === "delete")
         await inventoryApi.deleteWarehouse(modal.warehouseId);
       else if (modal.mode === "edit")
         await inventoryApi.updateWarehouse(modal.warehouseId, {
           warehouseName: name.trim(),
         });
       else await inventoryApi.createWarehouse({ warehouseName: name.trim() });
-      setNotice({
-        type: "success",
-        text:
-          modal.mode === "delete"
-            ? "Đã xóa kho hàng."
-            : "Đã lưu thông tin kho hàng.",
-      });
+      setNotice(
+        modal.mode === "transfer"
+          ? "Đã chuyển/phân bổ hàng vào kho nhận. Tổng tồn không thay đổi."
+          : "Đã lưu thay đổi kho hàng.",
+      );
       setModal(null);
       await load();
       onDataChange?.();
     } catch (e) {
-      setFormError(e.message);
+      setError(e.message);
     } finally {
-      setSubmitting(false);
+      setBusy(false);
     }
   };
   const filtered = warehouses.filter((w) =>
-    `${w.warehouseId} ${w.warehouseName}`
+    `${w.warehouseName} ${w.warehouseId}`
       .toLowerCase()
       .includes(search.toLowerCase().trim()),
   );
@@ -111,18 +142,18 @@ export default function WarehouseManagement({ onDataChange }) {
       <div className="stat-grid">
         <Metric
           icon="warehouse"
-          value={warehouses.length}
-          label="Điểm kho trong hệ thống"
+          value={warehouses.filter((w) => !w.isUnallocated).length}
+          label="Kho thực tế"
+        />
+        <Metric
+          icon="box"
+          value={warehouses.filter((w) => w.productCount > 0).length}
+          label="Kho đang có hàng"
         />
         <Metric
           icon="history"
-          value={warehouses.reduce((sum, w) => sum + w.transactionCount, 0)}
-          label="Giao dịch đã ghi nhận"
-        />
-        <Metric
-          icon="chart"
-          value={warehouses.filter((w) => w.transactionCount > 0).length}
-          label="Kho đã phát sinh giao dịch"
+          value={warehouses.reduce((n, w) => n + w.transactionCount, 0)}
+          label="Dòng lịch sử nhập/xuất/chuyển"
         />
       </div>
       <section className="card">
@@ -130,31 +161,33 @@ export default function WarehouseManagement({ onDataChange }) {
           <div>
             <h2 className="card-title">Danh sách kho hàng</h2>
             <p className="card-subtitle">
-              Quản lý thông tin và địa điểm ghi nhận giao dịch.
+              Xem từng sản phẩm theo kho và phân bổ/chuyển hàng giữa các kho.
             </p>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="row-actions">
             <button
               className="btn btn-outline"
               disabled={loading}
               onClick={load}
-              aria-label="Làm mới danh sách kho"
             >
-              <Icon name="refresh" size={16} />
+              Làm mới
             </button>
             <button
               className="btn btn-primary"
               onClick={() => open({ mode: "create" })}
             >
-              <Icon name="plus" size={16} />
               Thêm kho hàng
             </button>
           </div>
         </div>
         {notice && (
-          <div className={`alert alert-${notice.type}`} role="status">
-            <Icon name={notice.type === "error" ? "alert" : "check"} />
-            <span>{notice.text}</span>
+          <div className="alert alert-success" role="status">
+            {notice}
+          </div>
+        )}
+        {error && !modal && (
+          <div className="alert alert-error" role="alert">
+            {error}
           </div>
         )}
         <div className="toolbar">
@@ -164,25 +197,20 @@ export default function WarehouseManagement({ onDataChange }) {
               setSearch(v);
               setPage(1);
             }}
-            placeholder="Tìm tên hoặc mã kho hàng..."
+            placeholder="Tìm tên hoặc mã kho..."
           />
-          <span className="muted">{filtered.length} kho hàng</span>
         </div>
         {loading ? (
-          <Empty loading title="Đang tải kho hàng..." />
+          <Empty loading title="Đang tải kho..." />
         ) : !filtered.length ? (
-          <Empty
-            title="Không tìm thấy kho hàng"
-            description="Thêm kho mới hoặc thay đổi từ khóa tìm kiếm."
-          />
+          <Empty title="Không tìm thấy kho" />
         ) : (
           <div className="table-responsive">
             <table className="table">
               <thead>
                 <tr>
                   <th>KHO HÀNG</th>
-                  <th>MÃ KHO</th>
-                  <th>GIAO DỊCH</th>
+                  <th>SẢN PHẨM CÒN HÀNG</th>
                   <th>THAO TÁC</th>
                 </tr>
               </thead>
@@ -190,42 +218,43 @@ export default function WarehouseManagement({ onDataChange }) {
                 {filtered.slice((page - 1) * 10, page * 10).map((w) => (
                   <tr key={w.warehouseId}>
                     <td>
-                      <div className="product-cell">
-                        <span>
-                          <Icon name="warehouse" size={18} />
-                        </span>
-                        <strong>{w.warehouseName}</strong>
-                      </div>
+                      <strong>{w.warehouseName}</strong>
+                      {w.isUnallocated && (
+                        <small>Tồn cũ chưa xác định vị trí — cần phân bổ</small>
+                      )}
                     </td>
-                    <td className="muted">
-                      KHO-{String(w.warehouseId).padStart(3, "0")}
-                    </td>
+                    <td>{w.productCount || 0} sản phẩm</td>
                     <td>
-                      <span className="badge badge-neutral">
-                        {w.transactionCount} giao dịch
-                      </span>
-                    </td>
-                    <td>
-                      <div style={{ display: "flex", gap: 8 }}>
+                      <div className="row-actions">
                         <button
                           className="btn btn-outline"
-                          onClick={() => open({ ...w, mode: "edit" })}
+                          onClick={() => {
+                            setSelected(w);
+                            loadStock(w.warehouseId);
+                          }}
                         >
-                          Chỉnh sửa
+                          Xem hàng trong kho
                         </button>
-                        <button
-                          className="btn btn-danger-outline"
-                          disabled={w.transactionCount > 0}
-                          title={
-                            w.transactionCount > 0
-                              ? "Kho đã có giao dịch, không thể xóa"
-                              : "Xóa kho"
-                          }
-                          onClick={() => open({ ...w, mode: "delete" })}
-                          aria-label={`Xóa ${w.warehouseName}`}
-                        >
-                          <Icon name="trash" size={15} />
-                        </button>
+                        {!w.isUnallocated && (
+                          <>
+                            <button
+                              className="btn btn-outline"
+                              onClick={() => open({ ...w, mode: "edit" })}
+                            >
+                              Chỉnh sửa
+                            </button>
+                            <button
+                              className="btn btn-danger-outline"
+                              disabled={
+                                w.transactionCount > 0 || w.productCount > 0
+                              }
+                              onClick={() => open({ ...w, mode: "delete" })}
+                              aria-label={`Xóa ${w.warehouseName}`}
+                            >
+                              <Icon name="trash" size={15} />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -236,85 +265,207 @@ export default function WarehouseManagement({ onDataChange }) {
         )}
         <Pagination total={filtered.length} page={page} onChange={setPage} />
       </section>
+      {selected && (
+        <section
+          className="card warehouse-detail"
+          aria-label="Hàng hóa theo kho"
+        >
+          <div className="card-header">
+            <div>
+              <h2 className="card-title">Hàng tại {selected.warehouseName}</h2>
+              <p className="card-subtitle">
+                {selected.isUnallocated
+                  ? "Phân bổ tồn cũ vào đúng kho thực tế trước khi xuất hàng."
+                  : "Số dư hiện tại của từng sản phẩm trong kho này."}
+              </p>
+            </div>
+            <button
+              className="btn btn-outline"
+              onClick={() => loadStock(selected.warehouseId)}
+            >
+              Làm mới tồn
+            </button>
+          </div>
+          {stockError && (
+            <div className="alert alert-error" role="alert">
+              {stockError}
+            </div>
+          )}
+          {stockLoading ? (
+            <Empty loading title="Đang tải hàng trong kho..." />
+          ) : !stocks.length ? (
+            <Empty
+              title="Kho chưa có hàng"
+              description="Ghi nhận nhập từ nhà cung cấp hoặc chuyển hàng từ kho khác."
+            />
+          ) : (
+            <div className="table-responsive">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>SẢN PHẨM</th>
+                    <th>TỒN TẠI KHO</th>
+                    <th>THAO TÁC</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stocks.map((s) => (
+                    <tr key={s.productId}>
+                      <td>{s.productName}</td>
+                      <td>
+                        <strong>{s.quantity}</strong> {s.unit}
+                      </td>
+                      <td>
+                        <button
+                          className="btn btn-outline"
+                          disabled={s.quantity <= 0}
+                          onClick={() => open({ ...s, mode: "transfer" })}
+                        >
+                          {selected.isUnallocated
+                            ? "Phân bổ vào kho"
+                            : "Chuyển kho"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
       {modal && (
         <div
           className="modal-overlay"
           onClick={(e) => {
-            if (e.target === e.currentTarget && !submitting) setModal(null);
+            if (e.target === e.currentTarget && !busy) setModal(null);
           }}
         >
           <section
             className="modal-card"
+            ref={dialog}
             role="dialog"
             aria-modal="true"
             aria-labelledby="warehouse-modal-title"
-            ref={dialogRef}
           >
             <h3 id="warehouse-modal-title">
-              {modal.mode === "delete"
-                ? "Xóa kho hàng?"
-                : modal.mode === "edit"
-                  ? "Chỉnh sửa kho hàng"
-                  : "Thêm kho hàng"}
+              {modal.mode === "transfer"
+                ? selected.isUnallocated
+                  ? "Phân bổ hàng vào kho"
+                  : "Chuyển hàng giữa kho"
+                : modal.mode === "delete"
+                  ? "Xóa kho hàng?"
+                  : modal.mode === "edit"
+                    ? "Chỉnh sửa kho hàng"
+                    : "Thêm kho hàng"}
             </h3>
             <p>
-              {modal.mode === "delete"
-                ? `Kho “${modal.warehouseName}” sẽ bị xóa khỏi danh mục. Thao tác này không thể hoàn tác.`
-                : "Đặt tên rõ ràng để dễ chọn khi nhập hoặc xuất hàng."}
+              {modal.mode === "transfer"
+                ? `${modal.productName} · Nguồn: ${selected.warehouseName} · Có ${modal.quantity} ${modal.unit}`
+                : modal.mode === "delete"
+                  ? `Xóa kho ${modal.warehouseName}?`
+                  : "Đặt tên rõ ràng để dễ chọn khi nhập/xuất hàng."}
             </p>
             {modal.mode === "create" && (
               <CatalogAiChat
                 entityType="warehouse"
-                disabled={submitting}
+                disabled={busy}
                 onBusyChange={setAiBusy}
-                onApply={(result) => {
-                  if (result.warehouseName) setName(result.warehouseName);
+                onApply={(r) => {
+                  if (r.warehouseName) setName(r.warehouseName);
                 }}
               />
             )}
             <form onSubmit={save}>
-              {modal.mode !== "delete" && (
-                <div className="form-field">
-                  <label htmlFor="warehouse-name">Tên kho hàng *</label>
-                  <input
-                    id="warehouse-name"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    maxLength={200}
-                    required
-                    disabled={submitting || aiBusy}
-                    placeholder="Ví dụ: Kho Bình Tân"
-                  />
+              {modal.mode === "transfer" ? (
+                <div className="form-grid">
+                  <div className="form-field">
+                    <label htmlFor="transfer-target">Kho nhận *</label>
+                    <select
+                      id="transfer-target"
+                      required
+                      value={toWarehouse}
+                      disabled={busy}
+                      onChange={(e) => setToWarehouse(e.target.value)}
+                    >
+                      <option value="">Chọn kho nhận</option>
+                      {warehouses
+                        .filter(
+                          (w) =>
+                            !w.isUnallocated &&
+                            w.warehouseId !== selected.warehouseId,
+                        )
+                        .map((w) => (
+                          <option key={w.warehouseId} value={w.warehouseId}>
+                            {w.warehouseName}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor="transfer-quantity">Số lượng chuyển *</label>
+                    <input
+                      id="transfer-quantity"
+                      required
+                      type="number"
+                      min="1"
+                      max={modal.quantity}
+                      step="1"
+                      value={quantity}
+                      disabled={busy}
+                      onChange={(e) => setQuantity(e.target.value)}
+                    />
+                  </div>
                 </div>
+              ) : (
+                modal.mode !== "delete" && (
+                  <div className="form-field">
+                    <label htmlFor="warehouse-name">Tên kho hàng *</label>
+                    <input
+                      id="warehouse-name"
+                      maxLength={200}
+                      required
+                      value={name}
+                      disabled={busy || aiBusy}
+                      onChange={(e) => setName(e.target.value)}
+                    />
+                  </div>
+                )
               )}
-              {formError && (
+              {error && (
                 <p className="field-error" role="alert">
-                  {formError}
+                  {error}
                 </p>
               )}
               <div className="modal-actions">
                 <button
                   type="button"
                   className="btn btn-outline"
+                  disabled={busy}
                   onClick={() => setModal(null)}
-                  disabled={submitting}
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
-                  className={`btn ${modal.mode === "delete" ? "btn-danger-outline" : "btn-primary"}`}
+                  className="btn btn-primary"
                   disabled={
-                    submitting ||
+                    busy ||
                     aiBusy ||
-                    (modal.mode !== "delete" && !name.trim())
+                    (modal.mode === "transfer"
+                      ? !toWarehouse ||
+                        Number(quantity) <= 0 ||
+                        Number(quantity) > modal.quantity
+                      : modal.mode !== "delete" && !name.trim())
                   }
                 >
-                  {submitting
+                  {busy
                     ? "Đang lưu..."
-                    : modal.mode === "delete"
-                      ? "Xóa kho hàng"
-                      : "Lưu kho hàng"}
+                    : modal.mode === "transfer"
+                      ? "Xác nhận chuyển kho"
+                      : modal.mode === "delete"
+                        ? "Xóa kho hàng"
+                        : "Lưu kho hàng"}
                 </button>
               </div>
             </form>

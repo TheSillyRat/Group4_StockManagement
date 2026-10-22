@@ -8,6 +8,7 @@ public class ProductDto
     public string ProductName { get; set; } = string.Empty;
     public string Unit { get; set; } = string.Empty;
     public int StockQuantity { get; set; }
+    public List<WarehouseStockDto> WarehouseStocks { get; set; } = new();
 }
 
 public class ProductStockDto
@@ -16,6 +17,7 @@ public class ProductStockDto
     public string ProductName { get; set; } = string.Empty;
     public string Unit { get; set; } = string.Empty;
     public int StockQuantity { get; set; }
+    public List<WarehouseStockDto> WarehouseStocks { get; set; } = new();
 }
 
 public class CreateProductDto
@@ -30,6 +32,8 @@ public class CreateProductDto
 
     [Range(0, int.MaxValue, ErrorMessage = "Initial stock quantity must be non-negative.")]
     public int StockQuantity { get; set; } = 0;
+    public int? WarehouseId { get; set; }
+    public int? SupplierId { get; set; }
 }
 
 public class UpdateProductDto
@@ -51,6 +55,8 @@ public class WarehouseDto
     public int WarehouseId { get; set; }
     public string WarehouseName { get; set; } = string.Empty;
     public int TransactionCount { get; set; }
+    public bool IsUnallocated { get; set; }
+    public int ProductCount { get; set; }
 }
 
 public class CreateWarehouseDto
@@ -93,4 +99,7 @@ public class ConfirmResult
     public string Message { get; set; } = string.Empty;
     public int? TransactionId { get; set; }
     public int? NewStockQuantity { get; set; }
+    public int? ProductId { get; set; }
+    public List<int> TransactionIds { get; set; } = new();
+    public DispatchOptionsDto? DispatchOptions { get; set; }
 }

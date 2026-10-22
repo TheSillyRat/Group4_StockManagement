@@ -13,10 +13,19 @@ public class ApplicationDbContext : DbContext
     public DbSet<Supplier> Suppliers => Set<Supplier>();
     public DbSet<Warehouse> Warehouses => Set<Warehouse>();
     public DbSet<InventoryTransaction> InventoryTransactions => Set<InventoryTransaction>();
+    public DbSet<WarehouseStock> WarehouseStocks => Set<WarehouseStock>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+        modelBuilder.Entity<WarehouseStock>(entity =>
+        {
+            entity.HasKey(s => new { s.ProductId, s.WarehouseId });
+            entity.HasOne(s => s.Product).WithMany(p => p.WarehouseStocks).HasForeignKey(s => s.ProductId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(s => s.Warehouse).WithMany(w => w.WarehouseStocks).HasForeignKey(s => s.WarehouseId).OnDelete(DeleteBehavior.Restrict);
+            entity.ToTable(t => t.HasCheckConstraint("CK_WarehouseStocks_Quantity", "[Quantity] >= 0"));
+        });
+        modelBuilder.Entity<Warehouse>().HasData(new Warehouse { WarehouseId = -1, WarehouseName = "Kho chờ phân bổ", IsUnallocated = true });
 
         // Configure InventoryTransaction relationships
         modelBuilder.Entity<InventoryTransaction>(entity =>
@@ -29,7 +38,7 @@ public class ApplicationDbContext : DbContext
             entity.HasOne(t => t.Supplier)
                   .WithMany(s => s.InventoryTransactions)
                   .HasForeignKey(t => t.SupplierId)
-                  .OnDelete(DeleteBehavior.SetNull);
+                  .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(t => t.Warehouse)
                   .WithMany(w => w.InventoryTransactions)

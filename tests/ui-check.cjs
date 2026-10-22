@@ -56,15 +56,12 @@ if (!playwright) throw new Error("Install Playwright to run UI checks.");
       .locator(".row-product")
       .click();
     check(
-      (await page.locator(".now-selected strong").innerText()) === "Product B",
-      "Selecting a product updates bottom controls",
+      (await page.locator(".selected-detail h3").innerText()) === "Product B",
+      "Selecting a product updates the stock detail panel",
     );
-    await page
-      .getByRole("button", { name: "Sản phẩm tiếp theo", exact: true })
-      .click();
     check(
-      (await page.locator(".now-selected strong").innerText()) === "Product C",
-      "Bottom next control works",
+      (await page.locator("footer.bottom-bar").count()) === 0,
+      "Bottom control bar has been removed",
     );
     await page
       .locator(".collection-row")
@@ -230,6 +227,16 @@ if (!playwright) throw new Error("Install Playwright to run UI checks.");
       "New product requires a unit before confirmation",
     );
     await page.locator("#review-unit").fill("roll");
+    check(
+      await page
+        .getByRole("button", {
+          name: "Xác nhận tạo sản phẩm & nhập kho",
+          exact: true,
+        })
+        .isDisabled(),
+      "New receipt requires a supplier",
+    );
+    await page.locator("#review-supplier").selectOption("1");
     await page
       .getByRole("button", {
         name: "Xác nhận tạo sản phẩm & nhập kho",
@@ -247,6 +254,92 @@ if (!playwright) throw new Error("Install Playwright to run UI checks.");
         confirmedPayload.unit === "roll" &&
         confirmedPayload.quantity === 12,
       "Final confirmation sends explicit consent and new-product fields (mocked write only)",
+    );
+    Object.assign(unknown, {
+      productName: "Product A",
+      productId: 1,
+      productExists: true,
+      productNotFound: false,
+      quantity: 20,
+      unit: "box",
+    });
+    mockedType = "Dispatch";
+    await page.route("**/api/inventory/dispatch-options?**", (route) => {
+      const url = new URL(route.request().url()),
+        quantity = Number(url.searchParams.get("quantity"));
+      return route.fulfill({
+        json: {
+          productId: 1,
+          warehouseId: 1,
+          requestedQuantity: quantity,
+          availableQuantity: 8,
+          shortageQuantity: Math.max(0, quantity - 8),
+          canFulfill: quantity <= 38,
+          message:
+            "Kho đã chọn chỉ có 8, còn thiếu 12. Bạn có muốn tạo thêm đơn xuất từ kho khác không?",
+          alternatives: [
+            {
+              warehouseId: 2,
+              warehouseName: "Thu Duc Warehouse",
+              quantity: 30,
+              unit: "box",
+            },
+          ],
+          suggestedAllocations: [
+            { warehouseId: 1, quantity: 8 },
+            { warehouseId: 2, quantity: 12 },
+          ],
+        },
+      });
+    });
+    await page
+      .locator("#inventory-prompt")
+      .fill("Dispatch 20 boxes Product A from Binh Tan Warehouse");
+    await page
+      .getByRole("button", { name: "Phân tích yêu cầu", exact: true })
+      .click();
+    await page
+      .getByRole("button", {
+        name: "Có, tạo kế hoạch xuất từ các kho còn hàng",
+        exact: true,
+      })
+      .waitFor();
+    check(
+      (await page.locator("#review-supplier").count()) === 0 &&
+        (await page
+          .getByRole("button", {
+            name: "Xác nhận & lưu giao dịch",
+            exact: true,
+          })
+          .isDisabled()),
+      "Outbound form hides supplier and blocks shortage until consent",
+    );
+    await page
+      .getByRole("button", {
+        name: "Có, tạo kế hoạch xuất từ các kho còn hàng",
+        exact: true,
+      })
+      .click();
+    check(
+      confirmCalls === 1,
+      "Accepting split plan does not save additional orders",
+    );
+    await page.screenshot({
+      path: "tests/artifacts/split-dispatch-plan.png",
+      fullPage: true,
+    });
+    await page
+      .getByRole("button", { name: "Xác nhận 2 đơn xuất", exact: true })
+      .click();
+    await page
+      .getByText("Đã ghi nhận giao dịch #999", { exact: true })
+      .waitFor();
+    check(
+      confirmCalls === 2 &&
+        confirmedPayload.confirmAdditionalDispatches === true &&
+        confirmedPayload.dispatchAllocations.length === 2 &&
+        confirmedPayload.supplierId === null,
+      "Final confirmation sends explicit consent, both warehouse legs and no supplier",
     );
     await page.getByRole("button", { name: "Sản phẩm", exact: true }).click();
     await page
@@ -346,6 +439,12 @@ if (!playwright) throw new Error("Install Playwright to run UI checks.");
       .getByLabel("Current Stock Quantity *", { exact: true })
       .fill("26");
     await page
+      .getByLabel("Nhà cung cấp nhập ban đầu *", { exact: true })
+      .selectOption("1");
+    await page
+      .getByLabel("Kho nhập ban đầu *", { exact: true })
+      .selectOption("1");
+    await page
       .getByRole("button", { name: "Create Product", exact: true })
       .click();
     await page.getByRole("dialog").waitFor({ state: "hidden" });
@@ -354,6 +453,65 @@ if (!playwright) throw new Error("Install Playwright to run UI checks.");
         productPayload.productName === "Giấy in thử nghiệm AI" &&
         productPayload.stockQuantity === 26,
       "Product is saved only on explicit confirmation and honors manual edits (mocked write)",
+    );
+    await page
+      .getByRole("combobox", { name: "Lọc sản phẩm theo kho", exact: true })
+      .selectOption("-1");
+    await page
+      .getByRole("columnheader", { name: "TỒN TẠI KHO", exact: true })
+      .waitFor();
+    check(
+      await page
+        .locator(".warehouse-stock-tags")
+        .first()
+        .innerText()
+        .then((t) => t.includes("Kho chờ phân bổ")),
+      "Product catalog filters and displays balances per warehouse",
+    );
+    await page
+      .getByRole("button", { name: "Xem tồn", exact: true })
+      .first()
+      .click();
+    await page
+      .getByRole("region", { name: "Chi tiết tồn sản phẩm", exact: true })
+      .waitFor();
+    check(
+      await page
+        .getByRole("region", { name: "Chi tiết tồn sản phẩm", exact: true })
+        .innerText()
+        .then((t) => t.includes("Kho chờ phân bổ")),
+      "Product stock inspection shows actual warehouse breakdown",
+    );
+    await page
+      .getByRole("button", { name: "Nhà cung cấp", exact: true })
+      .click();
+    let supplierRows = await (
+      await page.request.get("http://localhost:5173/api/suppliers")
+    ).json();
+    let supplierWrites = 0;
+    await page.route("**/api/suppliers", async (route) => {
+      if (route.request().method() === "POST") {
+        const input = route.request().postDataJSON();
+        supplierWrites++;
+        const row = { supplierId: 9997, supplierName: input.supplierName };
+        supplierRows.push(row);
+        return route.fulfill({ status: 201, json: row });
+      }
+      return route.fulfill({ json: supplierRows });
+    });
+    await page
+      .getByRole("button", { name: "Thêm nhà cung cấp", exact: true })
+      .click();
+    await page
+      .getByLabel("Tên nhà cung cấp *", { exact: true })
+      .fill("Nhà cung cấp kiểm thử UI");
+    await page
+      .getByRole("button", { name: "Lưu nhà cung cấp", exact: true })
+      .click();
+    await page.getByRole("dialog").waitFor({ state: "hidden" });
+    check(
+      supplierWrites === 1,
+      "Supplier management creates a supplier only after confirmation (mocked write)",
     );
     await page.getByRole("button", { name: "Kho hàng", exact: true }).click();
     await page
@@ -388,6 +546,46 @@ if (!playwright) throw new Error("Install Playwright to run UI checks.");
     check(
       (await page.getByRole("dialog").count()) === 0,
       "Escape closes warehouse dialog",
+    );
+    await page
+      .getByRole("row")
+      .filter({ hasText: "Kho chờ phân bổ" })
+      .getByRole("button", { name: "Xem hàng trong kho", exact: true })
+      .click();
+    const stockRegion = page.getByRole("region", {
+      name: "Hàng hóa theo kho",
+      exact: true,
+    });
+    await stockRegion
+      .getByRole("button", { name: "Phân bổ vào kho", exact: true })
+      .first()
+      .waitFor();
+    check(
+      (await stockRegion.getByRole("row").count()) > 1,
+      "Warehouse management lists actual products and balances",
+    );
+    let transferPayload;
+    await page.route("**/api/inventory/transfer", (route) => {
+      transferPayload = route.request().postDataJSON();
+      return route.fulfill({
+        json: { success: true, message: "Đã chuyển/phân bổ hàng." },
+      });
+    });
+    await stockRegion
+      .getByRole("button", { name: "Phân bổ vào kho", exact: true })
+      .first()
+      .click();
+    await page.getByLabel("Kho nhận *", { exact: true }).selectOption("1");
+    await page.getByLabel("Số lượng chuyển *", { exact: true }).fill("1");
+    await page
+      .getByRole("button", { name: "Xác nhận chuyển kho", exact: true })
+      .click();
+    await page.getByRole("dialog").waitFor({ state: "hidden" });
+    check(
+      transferPayload.fromWarehouseId === -1 &&
+        transferPayload.toWarehouseId === 1 &&
+        transferPayload.quantity === 1,
+      "Explicit allocation sends source, destination and quantity without changing total (mocked write)",
     );
     await page
       .getByRole("button", { name: "Lịch sử giao dịch", exact: true })

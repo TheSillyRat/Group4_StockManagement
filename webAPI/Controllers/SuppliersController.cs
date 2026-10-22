@@ -108,9 +108,23 @@ public class SuppliersController : ControllerBase
             return NotFound(new { message = $"Supplier with ID {id} was not found." });
         }
 
+        if (await _context.InventoryTransactions.AnyAsync(t => t.SupplierId == id))
+            return BadRequest(new { message = "Không thể xóa nhà cung cấp đã có giao dịch nhập kho." });
         _context.Suppliers.Remove(supplier);
         await _context.SaveChangesAsync();
 
         return Ok(new { message = $"Supplier '{supplier.SupplierName}' has been successfully deleted." });
+    }
+
+    [HttpPut("{id:int}")]
+    public async Task<IActionResult> UpdateSupplier(int id, UpdateSupplierDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.SupplierName)) return BadRequest(new { message = "Tên nhà cung cấp không được để trống." });
+        var supplier = await _context.Suppliers.FindAsync(id);
+        if (supplier == null) return NotFound(new { message = "Nhà cung cấp không tồn tại." });
+        var name = dto.SupplierName.Trim();
+        if (await _context.Suppliers.AnyAsync(s => s.SupplierId != id && s.SupplierName.ToLower() == name.ToLower())) return BadRequest(new { message = "Tên nhà cung cấp đã tồn tại." });
+        supplier.SupplierName = name; await _context.SaveChangesAsync();
+        return Ok(new SupplierDto { SupplierId = id, SupplierName = name });
     }
 }

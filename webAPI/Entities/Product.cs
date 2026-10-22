@@ -17,6 +17,7 @@ public class Product
     public string Unit { get; set; } = string.Empty; // e.g., "box", "kg", "item"
 
     public int StockQuantity { get; set; } = 0;
+    public ICollection<WarehouseStock> WarehouseStocks { get; set; } = new List<WarehouseStock>();
 
     // Navigation property
     public ICollection<InventoryTransaction> InventoryTransactions { get; set; } = new List<InventoryTransaction>();

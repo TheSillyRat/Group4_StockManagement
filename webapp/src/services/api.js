@@ -27,14 +27,17 @@ async function request(path, options = {}) {
   if (json === null) {
     throw new Error("API chưa trả về dữ liệu. Vui lòng thử lại.");
   }
-  if (!res.ok || json?.success === false)
-    throw new Error(
+  if (!res.ok || json?.success === false) {
+    const error = new Error(
       json?.message ||
         json?.detail ||
         (res.status >= 500
           ? "Máy chủ chưa xử lý được yêu cầu. Vui lòng thử lại sau."
           : "Dữ liệu không hợp lệ. Vui lòng kiểm tra lại các trường."),
     );
+    error.dispatchOptions = json?.dispatchOptions;
+    throw error;
+  }
   return json;
 }
 export const inventoryApi = {
@@ -52,7 +55,24 @@ export const inventoryApi = {
   deleteProduct: (id) => request(`/products/${id}`, { method: "DELETE" }),
   getProductStock: (id) => request(`/products/${id}/stock`),
   getAllProductsStock: () => request("/products/stock"),
-  getProducts: () => request("/products"),
+  getProducts: (warehouseId) =>
+    request(`/products${warehouseId ? `?warehouseId=${warehouseId}` : ""}`),
+  getWarehouseStock: (id) => request(`/warehouses/${id}/stock`),
+  getDispatchOptions: (productId, warehouseId, quantity, signal) =>
+    request(
+      `/inventory/dispatch-options?productId=${productId}&warehouseId=${warehouseId}&quantity=${quantity}`,
+      { signal },
+    ),
+  transferStock: (data) =>
+    request("/inventory/transfer", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  createSupplier: (data) =>
+    request("/suppliers", { method: "POST", body: JSON.stringify(data) }),
+  updateSupplier: (id, data) =>
+    request(`/suppliers/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteSupplier: (id) => request(`/suppliers/${id}`, { method: "DELETE" }),
   getWarehouses: () => request("/warehouses"),
   getSuppliers: () => request("/suppliers"),
   createWarehouse: (data) =>

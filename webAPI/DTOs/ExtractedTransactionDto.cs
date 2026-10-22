@@ -25,6 +25,7 @@ public class ExtractedTransactionDto
     public bool ProductNotFound { get; set; }
     public bool CanCreateProduct { get; set; }
     public string? ValidationMessage { get; set; }
+    public DispatchOptionsDto? DispatchOptions { get; set; }
 
     // Ambiguity handling (R4.7)
     public bool IsAmbiguous { get; set; }

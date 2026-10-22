@@ -54,6 +54,7 @@ public class InventoryController : ControllerBase
             return BadRequest(new
             {
                 message = result.Message,
+                dispatchOptions = result.DispatchOptions,
                 success = false
             });
         }
@@ -62,9 +63,25 @@ public class InventoryController : ControllerBase
         {
             message = result.Message,
             transactionId = result.TransactionId,
+            transactionIds = result.TransactionIds,
+            productId = result.ProductId,
             newStockQuantity = result.NewStockQuantity,
             success = true
         });
+    }
+
+    [HttpGet("dispatch-options")]
+    public async Task<IActionResult> DispatchOptions(int productId, int warehouseId, int quantity)
+    {
+        if (productId <= 0 || warehouseId <= 0 || quantity <= 0) return BadRequest(new { message = "Vui lòng chọn sản phẩm, kho và số lượng dương." });
+        return Ok(await _inventoryService.GetDispatchOptionsAsync(productId, warehouseId, quantity));
+    }
+
+    [HttpPost("transfer")]
+    public async Task<IActionResult> Transfer(TransferStockRequest request)
+    {
+        var result = await _inventoryService.TransferStockAsync(request);
+        return result.Success ? Ok(result) : BadRequest(result);
     }
 
     /// <summary>

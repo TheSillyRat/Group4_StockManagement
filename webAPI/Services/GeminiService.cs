@@ -91,7 +91,7 @@ Return ONLY a valid JSON object with the following schema:
 Rules:
 1. Transaction type must be strictly ""Receive"" or ""Dispatch"".
 2. If the user request lacks essential details such as product name, target warehouse, or quantity (for example: ""Send some items to warehouse"", ""Nhập một ít hàng"", ""Move items""), set ""isAmbiguous"": true and provide a specific clarificationMessage listing what is missing.
-3. For ""Receive"" transactions, extract supplierName if mentioned. For ""Dispatch"" transactions, supplierName should be null unless explicitly stated.
+3. Receive means receiving FROM a supplier INTO a warehouse. Supplier is required: extract it exactly, or mark ambiguous and ask for it. Dispatch means shipping FROM a warehouse to outside: ALWAYS set supplierName=null, even if a supplier is mentioned. Never invent a supplier.
 4. Quantity must be a positive integer > 0. If missing or non-numeric, mark ""isAmbiguous"": true.
 5. Return RAW JSON only, without markdown fences (no ```json or ```).
 6. Preserve the exact product name from the request, including new or unfamiliar products. Never replace it with an example product. Product existence is checked against the database by the application, not by you.";

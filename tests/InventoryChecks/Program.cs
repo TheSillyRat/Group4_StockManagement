@@ -7,6 +7,10 @@ using Microsoft.Extensions.Configuration;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.AspNetCore.Mvc;
+using webAPI.Controllers;
 
 // Isolated, uniquely named LocalDB; never use or modify the application database.
 var database = "StockFlow_Checks_" + Guid.NewGuid().ToString("N");
@@ -21,7 +25,13 @@ async Task<int> Stock() { await using var db=Context(); return await db.Products
 async Task<int> Count() { await using var db=Context(); return await db.InventoryTransactions.CountAsync(); }
 await using var setup=Context();
 try {
+  await setup.GetService<IMigrator>().MigrateAsync("20261022014407_InitialCreate");
+  await setup.Database.ExecuteSqlRawAsync("SET IDENTITY_INSERT Products ON; INSERT Products(ProductId,ProductName,StockQuantity,Unit) VALUES(4,'User-owned product',17,'item'); SET IDENTITY_INSERT Products OFF;");
   await setup.Database.MigrateAsync();
+  Check(await setup.Products.AnyAsync(p=>p.ProductId==4 && p.ProductName=="User-owned product" && p.StockQuantity==17),"Catalog migration preserves user-created IDs and stock instead of overwriting demo data");
+  Check(await setup.WarehouseStocks.Where(s=>s.ProductId==1 && s.WarehouseId==-1).Select(s=>s.Quantity).SingleAsync()==100,"Migration preserves legacy total in unallocated stock without inventing a physical location");
+  // Fixture: allocate Product A to warehouse 1 before testing normal operations.
+  await setup.Database.ExecuteSqlRawAsync("UPDATE WarehouseStocks SET WarehouseId=1 WHERE ProductId=1 AND WarehouseId=-1");
   Check(await Stock()==100 && await Count()==0,"Seeded isolated database; no unconfirmed transactions");
   var receive=await Confirm(Request("Receive",20));
   Check(receive.Success && receive.TransactionId.HasValue && receive.NewStockQuantity==120 && await Stock()==120 && await Count()==1,"Receive saves history and increments stock");
@@ -49,7 +59,7 @@ try {
     var missingReceive = await Service(validationDb).ValidateExtractedDataAsync(new() { TransactionType="Receive", ProductName="New test item", WarehouseName="Binh Tan Warehouse", Quantity=20, Unit="box" });
     Check(missingReceive.ProductNotFound && missingReceive.CanCreateProduct && !missingReceive.IsValid && missingReceive.ValidationMessage!.Contains("Bạn có muốn"),"Unknown receive asks whether to create product; extraction does not save");
   }
-  ConfirmTransactionRequest NewRequest(string name, bool consent=true, string type="Receive") => new() { TransactionType=type, ProductName=name, Unit="box", WarehouseId=1, Quantity=20, CreateNewProduct=consent };
+  ConfirmTransactionRequest NewRequest(string name, bool consent=true, string type="Receive") => new() { TransactionType=type, ProductName=name, Unit="box", WarehouseId=1, SupplierId=1, Quantity=20, CreateNewProduct=consent };
   Check(!(await Confirm(NewRequest("New test item",false))).Success && !(await Confirm(NewRequest("New test item",false,"Dispatch"))).Success && !(await Confirm(NewRequest("New test item",true,"Dispatch"))).Success,"Unknown product cannot be received without consent or dispatched with/without consent");
   Check(!(await Confirm(NewRequest("Product A"))).Success,"Create-new consent cannot silently receive into an existing product");
   var missingUnit=NewRequest("Missing unit item"); missingUnit.Unit=" ";
@@ -87,6 +97,68 @@ try {
   var warehouseDraft = await catalogAi.ExtractAsync(chat, default);
   Check(warehouseDraft.IsComplete && warehouseDraft.WarehouseName=="Kho Bình Dương" && warehouseDraft.ProductName==null && warehouseDraft.Unit==null && warehouseDraft.StockQuantity==null,"Warehouse chat returns only the supported warehouse-name field");
   Check(await Count()==5,"Catalog chat extraction does not create inventory transactions");
+  var noSupplier=Request("Receive",2);noSupplier.SupplierId=null;
+  Check(!(await Confirm(noSupplier)).Success && await Count()==5,"Receipt requires a supplier even for direct API calls");
+  var secondReceipt=Request("Receive",40);secondReceipt.WarehouseId=2;secondReceipt.SupplierId=2;
+  Check((await Confirm(secondReceipt)).Success && await Stock()==65,"Receipt increases only the selected warehouse and the product total");
+  await using(var checkDb=Context()) {
+    var validation=await Service(checkDb).ValidateExtractedDataAsync(new(){TransactionType="Dispatch",ProductName="Product A",WarehouseName="Binh Tan Warehouse",Quantity=50,Unit="box",SupplierName="Supplier X"});
+    Check(validation.SupplierId==null && validation.SupplierName==null && !validation.IsValid && validation.DispatchOptions?.ShortageQuantity==25 && validation.DispatchOptions.CanFulfill,"AI result warns about warehouse shortage, strips supplier and suggests actual alternatives");
+  }
+  var beforeSplit=await Count();
+  var split=Request("Dispatch",50);
+  Check(!(await Confirm(split)).Success && await Stock()==65 && await Count()==beforeSplit,"Insufficient selected warehouse never silently spends another warehouse");
+  split.DispatchAllocations=new(){new(){WarehouseId=1,Quantity=25},new(){WarehouseId=2,Quantity=25}};
+  Check(!(await Confirm(split)).Success,"Additional dispatch orders require explicit consent");
+  split.ConfirmAdditionalDispatches=true;
+  var splitResult=await Confirm(split);
+  Check(splitResult.Success && splitResult.TransactionIds.Count==2 && await Stock()==15 && await Count()==beforeSplit+2,"Consented split dispatch creates two orders atomically and reduces total once");
+  await using(var checkDb=Context()) Check(await checkDb.InventoryTransactions.Where(t=>splitResult.TransactionIds.Contains(t.TransactionId)).AllAsync(t=>t.SupplierId==null),"Outbound dispatch records never carry a supplier");
+  var rollbackSplit=Request("Dispatch",10);rollbackSplit.ConfirmAdditionalDispatches=true;rollbackSplit.DispatchAllocations=new(){new(){WarehouseId=2,Quantity=5},new(){WarehouseId=3,Quantity=5}};
+  var failedSplit=await Confirm(rollbackSplit);
+  await using(var checkDb=Context()) Check(!failedSplit.Success && await Stock()==15 && await Count()==beforeSplit+2 && await checkDb.WarehouseStocks.Where(s=>s.ProductId==1 && s.WarehouseId==2).Select(s=>s.Quantity).SingleAsync()==15,"One insufficient leg rolls back every stock change and all additional orders");
+  await using(var checkDb=Context()) {
+    var moved=await Service(checkDb).TransferStockAsync(new(){ProductId=1,FromWarehouseId=2,ToWarehouseId=3,Quantity=6});
+    Check(moved.Success && await Stock()==15 && await checkDb.WarehouseStocks.AsNoTracking().Where(s=>s.ProductId==1 && s.WarehouseId==3).Select(s=>s.Quantity).SingleAsync()==6,"Warehouse transfer preserves global quantity and moves actual per-warehouse stock");
+  }
+  await setup.Database.ExecuteSqlRawAsync("CREATE TRIGGER RejectTestInsert ON InventoryTransactions AFTER INSERT AS BEGIN THROW 51000, 'Forced test failure', 1; END");
+  var beforeTransferFailure=await Count();
+  await using(var checkDb=Context()) {
+    var moved=await Service(checkDb).TransferStockAsync(new(){ProductId=1,FromWarehouseId=2,ToWarehouseId=1,Quantity=2});
+    Check(!moved.Success && await Stock()==15 && await Count()==beforeTransferFailure && await checkDb.WarehouseStocks.AsNoTracking().Where(s=>s.ProductId==1 && s.WarehouseId==2).Select(s=>s.Quantity).SingleAsync()==9,"Transfer history failure restores both source and destination balances");
+  }
+  await setup.Database.ExecuteSqlRawAsync("DROP TRIGGER RejectTestInsert");
+  await using(var checkDb=Context()) {
+    var allocated=await Service(checkDb).TransferStockAsync(new(){ProductId=2,FromWarehouseId=-1,ToWarehouseId=1,Quantity=10});
+    Check(allocated.Success && await checkDb.Products.Where(p=>p.ProductId==2).Select(p=>p.StockQuantity).SingleAsync()==50,"Unallocated legacy stock can be explicitly assigned without changing total");
+    Check(!await checkDb.Products.AnyAsync(p=>p.StockQuantity!=p.WarehouseStocks.Sum(s=>s.Quantity)),"Every product total equals the sum of its warehouse balances");
+  }
+  var simultaneousSplit=Request("Dispatch",10);simultaneousSplit.WarehouseId=2;simultaneousSplit.ConfirmAdditionalDispatches=true;
+  simultaneousSplit.DispatchAllocations=new(){new(){WarehouseId=2,Quantity=6},new(){WarehouseId=3,Quantity=4}};
+  var countBeforeConcurrentSplit=await Count();
+  var simultaneousResults=await Task.WhenAll(Confirm(simultaneousSplit),Confirm(simultaneousSplit));
+  Check(simultaneousResults.Count(r=>r.Success)==1 && await Stock()==5 && await Count()==countBeforeConcurrentSplit+2,"Concurrent split confirmations cannot oversell or create partial extra orders");
+  await using(var checkDb=Context()) {
+    var blockedDelete=false;
+    try { await checkDb.Suppliers.Where(s=>s.SupplierId==1).ExecuteDeleteAsync(); } catch { blockedDelete=true; }
+    Check(blockedDelete && await checkDb.Suppliers.AnyAsync(s=>s.SupplierId==1),"Database prevents deletion of a supplier referenced by receipt history");
+    Check(!await checkDb.Products.AnyAsync(p=>p.StockQuantity!=p.WarehouseStocks.Sum(s=>s.Quantity)),"Warehouse totals remain consistent after concurrent split orders");
+  }
+  await using(var checkDb=Context()) {
+    var controller=new ProductsController(checkDb,Service(checkDb));
+    var missingSource=await controller.CreateProduct(new(){ProductName="No receipt source",Unit="box",StockQuantity=4,WarehouseId=1});
+    Check(missingSource is BadRequestObjectResult && !await checkDb.Products.AnyAsync(p=>p.ProductName=="No receipt source"),"Create-product API rejects positive initial stock without a supplier and creates no orphan product");
+    var createdProduct=await controller.CreateProduct(new(){ProductName="Controller receipt item",Unit="box",StockQuantity=4,WarehouseId=2,SupplierId=1});
+    var createdDto=(createdProduct as CreatedAtActionResult)?.Value as ProductDto;
+    Check(createdDto?.StockQuantity==4 && createdDto.WarehouseStocks.Single().WarehouseId==2 && createdDto.WarehouseStocks.Single().Quantity==4,"Create-product API records initial receipt in the chosen warehouse");
+    Check(await controller.UpdateProduct(createdDto!.ProductId,new(){ProductName=createdDto.ProductName,Unit="box",StockQuantity=99}) is BadRequestObjectResult,"Metadata API cannot bypass warehouse stock updates");
+    var supplierController=new SuppliersController(checkDb);
+    Check(await supplierController.DeleteSupplier(1) is BadRequestObjectResult,"Supplier API refuses deletion when receipt history exists");
+    var supplierCreated=await supplierController.CreateSupplier(new(){SupplierName="Temporary isolated supplier"});
+    var supplierDto=(supplierCreated.Result as CreatedAtActionResult)?.Value as SupplierDto;
+    Check(supplierDto!=null && await supplierController.UpdateSupplier(supplierDto.SupplierId,new(){SupplierName="Updated isolated supplier"}) is OkObjectResult && await supplierController.DeleteSupplier(supplierDto.SupplierId) is OkObjectResult,"Supplier create, update and delete APIs work for unused catalog entries");
+    Check(await new WarehousesController(checkDb).DeleteWarehouse(-1) is BadRequestObjectResult,"System unallocated warehouse cannot be deleted");
+  }
   Console.WriteLine("ALL CHECKS PASSED");
 } finally {
   // Only the test-owned database named above is removed.

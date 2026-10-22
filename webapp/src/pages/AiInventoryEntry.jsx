@@ -51,6 +51,7 @@ export default function AiInventoryEntry({ onViewHistory, onDataChange }) {
     setSaved(null);
     try {
       const result = await inventoryApi.extractFromAi(prompt.trim());
+      await loadReferences();
       setData(result);
       if (result.isAmbiguous)
         setNotice({
@@ -59,6 +60,8 @@ export default function AiInventoryEntry({ onViewHistory, onDataChange }) {
             result.clarificationMessage ||
             "Vui lòng bổ sung thông tin còn thiếu trong biểu mẫu bên dưới.",
         });
+      else if (result.validationMessage)
+        setNotice({ type: "warning", text: result.validationMessage });
     } catch (err) {
       setNotice({ type: "error", text: err.message });
     } finally {
@@ -78,6 +81,7 @@ export default function AiInventoryEntry({ onViewHistory, onDataChange }) {
       onDataChange?.();
     } catch (err) {
       setNotice({ type: "error", text: err.message });
+      return err;
     } finally {
       setSubmitting(false);
     }
@@ -133,7 +137,11 @@ export default function AiInventoryEntry({ onViewHistory, onDataChange }) {
             <Icon name="check" size={26} />
           </span>
           <div>
-            <h3>Đã ghi nhận giao dịch #{saved.transactionId}</h3>
+            <h3>
+              {saved.transactionIds?.length > 1
+                ? `Đã ghi nhận ${saved.transactionIds.length} đơn xuất`
+                : `Đã ghi nhận giao dịch #${saved.transactionId}`}
+            </h3>
             <p>{saved.message}</p>
           </div>
           <button className="btn btn-outline" onClick={onViewHistory}>

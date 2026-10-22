@@ -85,6 +85,8 @@ export default function TransactionHistory() {
               ["ALL", "Tất cả"],
               ["Receive", "Nhập kho"],
               ["Dispatch", "Xuất kho"],
+              ["TransferIn", "Nhận chuyển kho"],
+              ["TransferOut", "Chuyển đi"],
             ].map(([key, label]) => (
               <button
                 key={key}
@@ -127,7 +129,9 @@ export default function TransactionHistory() {
                   <th>LOẠI</th>
                   <th>SỐ LƯỢNG</th>
                   <th>KHO HÀNG</th>
-                  <th>NHÀ CUNG CẤP</th>
+                  {(type === "ALL" || type === "Receive") && (
+                    <th>NHÀ CUNG CẤP</th>
+                  )}
                   <th>THỜI GIAN</th>
                 </tr>
               </thead>
@@ -151,9 +155,12 @@ export default function TransactionHistory() {
                           name={t.transactionType === "Receive" ? "down" : "up"}
                           size={12}
                         />
-                        {t.transactionType === "Receive"
-                          ? "Nhập kho"
-                          : "Xuất kho"}
+                        {{
+                          Receive: "Nhập từ NCC",
+                          Dispatch: "Xuất ra ngoài",
+                          TransferIn: "Nhận chuyển kho",
+                          TransferOut: "Chuyển đi",
+                        }[t.transactionType] || t.transactionType}
                       </span>
                     </td>
                     <td
@@ -164,13 +171,21 @@ export default function TransactionHistory() {
                       }
                     >
                       <strong>
-                        {t.transactionType === "Receive" ? "+" : "−"}
+                        {["Receive", "TransferIn"].includes(t.transactionType)
+                          ? "+"
+                          : "−"}
                         {t.quantity.toLocaleString("vi-VN")}
                       </strong>{" "}
                       {t.unit}
                     </td>
                     <td>{t.warehouseName}</td>
-                    <td className="muted">{t.supplierName || "—"}</td>
+                    {(type === "ALL" || type === "Receive") && (
+                      <td className="muted">
+                        {t.transactionType === "Receive"
+                          ? t.supplierName || "Không ghi nhận (lịch sử cũ)"
+                          : "—"}
+                      </td>
+                    )}
                     <td className="muted">{date(t.createdAt)}</td>
                   </tr>
                 ))}

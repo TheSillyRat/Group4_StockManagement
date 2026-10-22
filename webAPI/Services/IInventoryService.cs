@@ -11,4 +11,6 @@ public interface IInventoryService
     Task<ExtractedTransactionDto> ValidateExtractedDataAsync(ExtractedTransactionDto dto);
     Task<ConfirmResult> ConfirmAndSaveTransactionAsync(ConfirmTransactionRequest request);
     Task<IEnumerable<TransactionHistoryDto>> GetTransactionHistoryAsync();
+    Task<DispatchOptionsDto> GetDispatchOptionsAsync(int productId, int warehouseId, int quantity);
+    Task<ConfirmResult> TransferStockAsync(TransferStockRequest request);
 }

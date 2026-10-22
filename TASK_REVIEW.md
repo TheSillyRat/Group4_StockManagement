@@ -1,71 +1,63 @@
-﻿# Kiểm tra phân hệ giao dịch và giao diện
+﻿# Kiểm tra nghiệp vụ quản lý kho
 
-## Trạng thái 5 task
+## Nghiệp vụ hiện tại
 
-| Task | Trạng thái | Thực hiện |
-| --- | --- | --- |
-| Database Transaction: lưu giao dịch cùng cập nhật tồn | Đã có, đã củng cố | `InventoryService.ConfirmAndSaveTransactionAsync`: UPDATE tồn và INSERT lịch sử trong cùng database transaction; rollback nếu INSERT lỗi. |
-| Stock Updates Logic | Đã có, đã sửa cạnh tranh | Nhập cộng tồn, xuất trừ tồn. SQL UPDATE có điều kiện ngăn xuất vượt tồn khi hai yêu cầu đồng thời; chặn tràn số nguyên khi nhập. |
-| Data Validation | Đã có, đã bổ sung | Số lượng nguyên dương, loại Receive/Dispatch, sản phẩm/kho/nhà cung cấp tồn tại, đơn vị khớp. Regex dự phòng từ chối số âm và số thập phân không hỗ trợ. |
-| Confirm API | Đã có | `POST /api/inventory/confirm`; UI chỉ gọi sau khi kiểm tra và người dùng bấm xác nhận. Trả ID giao dịch và số dư mới. |
-| Transaction History API | Đã có | `GET /api/inventory/history`; thông tin sản phẩm, nhà cung cấp, kho, số lượng và thời gian; mới nhất trước, ID làm khóa sắp xếp phụ. |
+- Nhập hàng là nhận từ **nhà cung cấp vào một kho thực tế**. Supplier bắt buộc ở cả giao diện và API; có màn hình thêm/sửa/xóa Supplier và thêm nhanh ngay trong form nhập.
+- Xuất hàng là **xuất từ kho ra ngoài**. Form ẩn Supplier; backend bỏ Supplier khỏi đơn xuất, kể cả client gửi lên.
+- Tồn thực tế nằm trong `WarehouseStocks`, khóa chính `(ProductId, WarehouseId)`, có check constraint không âm. `Product.StockQuantity` là tổng tồn được cập nhật trong cùng transaction với tồn từng kho và lịch sử.
+- Sản phẩm chưa tồn tại: xuất bị từ chối; nhập hỏi đồng ý tạo mới, sau đó tạo Product, nhận hàng từ Supplier vào kho và lưu lịch sử cùng lúc.
+- Khi kho xuất thiếu hàng, API/AI-extract trả số có, số thiếu, kho khác còn hàng và kế hoạch gợi ý. Không tự tạo đơn. Người dùng đồng ý kế hoạch, xem rõ số lượng từng kho, rồi xác nhận cuối để tạo các đơn xuất (tối đa 20 kho).
+- Đơn tách phải có tổng bằng yêu cầu, số lượng dương, kho không trùng và `confirmAdditionalDispatches=true`. Nếu một kho không đủ khi ghi, mọi đơn và số dư trong lần xác nhận được rollback.
+- Màn hình Product lọc theo Warehouse, hiển thị tồn từng kho và chi tiết số dư. Không được sửa trực tiếp số tồn trong form chỉnh sửa metadata.
+- Tạo Product có tồn ban đầu > 0 bắt buộc Supplier và kho nhận, tạo kèm đơn nhập. Product số tồn 0 chỉ tạo danh mục.
+- Màn hình Warehouse hiển thị sản phẩm, số lượng theo kho; hỗ trợ chuyển kho/phân bổ với lịch sử `TransferOut` / `TransferIn`. Chuyển kho không thay đổi tổng tồn.
+- Supplier đã có lịch sử nhập không xóa được; FK ở database cũng ngăn xóa để giữ tham chiếu lịch sử.
+- Khung chat AI ở form thêm Product/Warehouse điền thông tin, hỗ trợ nhiều lượt và sửa tay. Phân tích không tự lưu.
+- Dashboard giữ sidebar tím 240px và cột thông tin 280px. Header đã thu gọn. `footer.bottom-bar`, các điều khiển và CSS liên quan đã được bỏ.
 
-## Kiểm chứng backend
+## Nâng cấp database cũ
 
-Chạy `dotnet run --project tests/InventoryChecks/InventoryChecks.csproj` với quyền truy cập SQL Server LocalDB.
+Chạy `dotnet ef database update --project webAPI/webAPI.csproj`.
 
-Bộ kiểm tra tạo database `StockFlow_Checks_<GUID>` riêng và xóa trong `finally`. Không sử dụng database ứng dụng.
+Tồn cũ chỉ có số tổng, không đủ dữ liệu để suy ra vị trí vật lý chính xác. Migration giữ nguyên số dư hiện có và đặt vào **Kho chờ phân bổ** (ID -1), không viết lại lịch sử. Vào Kho hàng → Kho chờ phân bổ → Xem hàng trong kho → Phân bổ vào kho để chọn vị trí thực tế. Kho chờ phân bổ không được dùng trực tiếp để nhập/xuất ra ngoài.
 
-Đã đạt:
-- Nhập +20 và xuất -15; số dư và bản ghi lịch sử khớp.
-- Từ chối số lượng 0/âm, sai loại, thiếu tồn, tham chiếu không tồn tại, sai đơn vị và tràn số.
-- Các yêu cầu bị từ chối không thay đổi tồn hoặc lịch sử.
-- Hai DbContext đọc cùng số dư cũ rồi xuất đồng thời: chỉ một yêu cầu đủ tồn được chấp nhận.
-- Trigger chỉ trong database kiểm tra buộc INSERT lịch sử thất bại: UPDATE tồn được hoàn tác.
-- Lịch sử có đủ tham chiếu và sắp xếp mới nhất trước.
-- Parser dự phòng từ chối số âm/thập phân.
+Migration seed danh mục cũ đã được làm an toàn khi ID demo trùng bản ghi người dùng: bỏ qua ID/tên đã tồn tại, không ghi đè tên hoặc số tồn. Rollback phần seed không tự xóa dữ liệu danh mục.
 
-## Kiểm chứng trình duyệt
+Migrations mới: `WarehouseInventory`, `ProtectSupplierHistory`. Môi trường đang dùng đã được áp dụng cả hai.
 
-Chạy backend cổng 5000, frontend Vite cổng 5173, sau đó `node tests/ui-check.cjs` (cần Playwright và Edge, hoặc chỉ định `TEST_BROWSER_PATH`).
+## API chính
 
-Đã đạt:
-- Sidebar desktop rộng 240px, màu #4A47A3; cột phải rộng 280px.
-- Tải sản phẩm thực tế; chọn sản phẩm cập nhật thanh dưới đáy.
-- Nút chuyển sản phẩm, đánh dấu và tìm kiếm hoạt động.
-- Trích xuất qua AI thật đến biểu mẫu xác nhận, không ghi giao dịch.
-- UI chặn xác nhận khi số lượng xuất vượt tồn.
-- Modal kho mở và đóng bằng Escape.
-- Viewport mobile 390px không tràn ngang toàn trang.
-- Không có lỗi JavaScript runtime.
+| Endpoint | Chức năng |
+| --- | --- |
+| `GET /api/products?warehouseId=...` | Danh mục, tổng/bộ lọc kho, breakdown `warehouseStocks` |
+| `GET /api/products/{id}/stock` | Tồn sản phẩm theo từng kho |
+| `GET /api/warehouses/{id}/stock` | Hàng trong một kho |
+| `GET/POST /api/suppliers`, `PUT/DELETE /api/suppliers/{id}` | Quản lý nguồn cung |
+| `POST /api/inventory/ai-extract` | Trích xuất và đối soát dữ liệu, cảnh báo tồn tại kho |
+| `GET /api/inventory/dispatch-options?productId=...&warehouseId=...&quantity=...` | Kiểm tra tồn và gợi ý kế hoạch |
+| `POST /api/inventory/confirm` | Lưu đơn nhập/xuất; mảng `dispatchAllocations` cần đồng ý rõ ràng |
+| `POST /api/inventory/transfer` | Chuyển/phân bổ với productId, fromWarehouseId, toWarehouseId, quantity |
+| `GET /api/inventory/history` | Lịch sử nhập/xuất/chuyển, mới nhất trước |
+| `POST /api/catalog/ai-extract` | Chat điền biểu mẫu, không ghi dữ liệu |
 
-Frontend: `npm.cmd --prefix webapp run build`.
-API smoke check: GET products/history qua Vite proxy trả 200; confirm số lượng 0 trả 400.
+## Kiểm chứng
 
-## Phạm vi dữ liệu
+- Frontend: `npm.cmd --prefix webapp run build`.
+- Backend/database: `dotnet run --project tests/InventoryChecks/InventoryChecks.csproj`.
+- Trình duyệt: `node tests/ui-check.cjs` (backend 5000, frontend 5173, cần Playwright và Edge hoặc `TEST_BROWSER_PATH`).
 
-Tồn kho hiện là tổng toàn hệ thống trên Product, chưa tách số dư theo từng kho. Giao diện ghi rõ phạm vi này. Nhà cung cấp là tùy chọn; nếu được gửi thì phải tồn tại. Số lượng là số nguyên, chưa hỗ trợ quy đổi đơn vị.
+Backend checks dùng database LocalDB tên ngẫu nhiên `StockFlow_Checks_<GUID>`, xóa trong finally; không thay đổi dữ liệu nghiệp vụ đang dùng. Bao phủ:
 
-Theme được triển khai bằng React/CSS và SVG nội bộ theo mô tả bố cục người dùng cung cấp. Trang preview Envato trả 403 nên không nhập mã template từ Envato.
+- Migration giữ bản ghi user trùng ID seed và giữ đúng tồn tổng trong kho chờ phân bổ.
+- Nhập/xuất, tham chiếu không hợp lệ, Supplier bắt buộc, đơn vị/số lượng, chống tràn số.
+- Xuất đồng thời, tách đơn có/không consent, sai số lượng từng leg, một leg thiếu tồn, tách đơn đồng thời.
+- Lỗi ghi lịch sử rollback tồn; lỗi tạo mới rollback cả Product; lỗi chuyển kho rollback nguồn/đích.
+- Chuyển kho và phân bổ giữ nguyên tổng; tổng Product luôn bằng tổng WarehouseStocks.
+- Không thể xóa Supplier đã được tham chiếu; API Product không cho sửa tồn trực tiếp.
+- Các trường hợp chat nhiều lượt, thiếu đơn vị, số lượng âm và trường ngoài phạm vi.
 
-## Luồng sản phẩm chưa tồn tại
+Browser checks dùng AI thật để điền Product/Warehouse và tới form xác nhận; thao tác ghi được mock để không tạo dữ liệu test trong database ứng dụng. Kiểm tra form xuất không có Supplier, thiếu tồn bị chặn, đồng ý kế hoạch chưa ghi, xác nhận gửi đúng từng kho và consent; quản lý Supplier, lọc Product theo kho, xem hàng trong kho, phân bổ; lỗi AI giữ dữ liệu; modal và mobile không tràn ngang; không có lỗi JavaScript.
 
-- `POST /api/inventory/ai-extract` đối soát tên thực tế với database, trả `productNotFound`, `canCreateProduct` và `validationMessage`. Các ID và cờ do AI tự trả về được xóa trước khi đối soát.
-- Xuất sản phẩm chưa tồn tại: báo lỗi và chặn lưu, không cho tạo mới trong giao dịch xuất.
-- Nhập sản phẩm chưa tồn tại: hỏi có muốn tạo mới; chọn Có chỉ mở form kiểm tra, chưa ghi dữ liệu. Tên tối đa 200 ký tự và đơn vị tối đa 50 ký tự là bắt buộc.
-- Xác nhận cuối gửi `createNewProduct: true`, `productName`, `unit`, `quantity` và kho. Không gửi cờ này thì API không tự tạo sản phẩm.
-- Tạo Product (tồn ban đầu 0), cập nhật tồn và ghi InventoryTransaction trong cùng transaction. Lỗi ghi lịch sử sẽ rollback cả Product mới.
-- Kiểm tra lại tên trong transaction SERIALIZABLE tránh hai xác nhận đồng thời tạo trùng sản phẩm. Nếu sản phẩm đã tồn tại, yêu cầu làm mới và chọn bản ghi có sẵn.
-- Đã kiểm chứng bằng database tạm: thiếu consent, xuất sản phẩm lạ, thiếu đơn vị, trùng tên, tạo+nhập thành công, rollback khi lỗi, và tạo cùng tên đồng thời.
-- Đã kiểm tra trình duyệt: báo không tồn tại khi xuất, hỏi Có/Không khi nhập, từ chối không ghi dữ liệu, chấp nhận chỉ mở form, thiếu đơn vị chặn lưu, xác nhận gửi đúng payload (mock riêng thao tác ghi).
+## Giới hạn
 
-## Chat AI trong form thêm sản phẩm và kho
-
-- Endpoint `POST /api/catalog/ai-extract` nhận `entityType` (`product` hoặc `warehouse`) và tối đa 12 tin nhắn user/assistant. Không ghi dữ liệu trong bước phân tích.
-- Form thêm sản phẩm: trích tên, đơn vị và tồn ban đầu; thiếu đơn vị thì hỏi bổ sung. Không lấy số trong tên sản phẩm làm số lượng. Tồn ban đầu mặc định 0 nếu không được nhắc đến.
-- Form thêm kho: trích tên kho theo các trường mà database hỗ trợ.
-- Chat hỗ trợ bổ sung/chỉnh sửa qua nhiều lượt; tên trùng được kiểm tra với database. Thông tin AI điền có thể sửa tay trước khi bấm lưu.
-- Lỗi AI giữ lại dữ liệu biểu mẫu và nội dung đang gửi để thử lại. Đóng modal sẽ hủy request đang chạy. Không cho lưu trong lúc AI phân tích.
-- Đã kiểm tra service bằng HTTP giả lập: thiếu đơn vị, giữ lịch sử hội thoại, số lượng âm, bỏ các trường ngoài phạm vi kho, không sinh giao dịch.
-- Đã kiểm tra trình duyệt với AI thật: điền tên sản phẩm rồi bổ sung đơn vị/tồn qua lượt chat tiếp theo; điền tên kho. Thao tác lưu được mock để xác minh chỉ gửi khi người dùng bấm xác nhận, bao gồm sửa tay sau AI. Đã kiểm tra lỗi 503 giữ dữ liệu và bố cục chat mobile.
-- API tên trùng trả `alreadyExists: true`; loại đối tượng không hỗ trợ, danh sách tin nhắn rỗng và role system do client gửi bị từ chối HTTP 400.
+Số lượng là số nguyên; chưa có quy đổi đơn vị. Gợi ý đơn xuất dùng tồn database hiện tại, được kiểm tra lại khi xác nhận, không đặt giữ hàng trong lúc người dùng đang xem.

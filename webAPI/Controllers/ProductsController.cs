@@ -1,227 +1,75 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using webAPI.Data;
 using webAPI.DTOs;
 using webAPI.Entities;
-
+using webAPI.Services;
 namespace webAPI.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class ProductsController : ControllerBase
+public class ProductsController(ApplicationDbContext db, IInventoryService inventory) : ControllerBase
 {
-    private readonly ApplicationDbContext _context;
-
-    public ProductsController(ApplicationDbContext context)
-    {
-        _context = context;
-    }
-
-    /// <summary>
-    /// GET: api/products
-    /// Retrieve all products along with their current stock quantities.
-    /// </summary>
+    private IQueryable<ProductDto> Query(int? warehouseId = null) => db.Products.AsNoTracking()
+        .Where(p => warehouseId == null || p.WarehouseStocks.Any(s => s.WarehouseId == warehouseId))
+        .Select(p => new ProductDto
+        {
+            ProductId = p.ProductId,
+            ProductName = p.ProductName,
+            Unit = p.Unit,
+            StockQuantity = warehouseId == null ? p.StockQuantity : p.WarehouseStocks.Where(s => s.WarehouseId == warehouseId).Sum(s => s.Quantity),
+            WarehouseStocks = p.WarehouseStocks.Select(s => new WarehouseStockDto { ProductId = p.ProductId, ProductName = p.ProductName, WarehouseId = s.WarehouseId, WarehouseName = s.Warehouse.WarehouseName, Quantity = s.Quantity, Unit = p.Unit, IsUnallocated = s.Warehouse.IsUnallocated }).ToList()
+        });
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<ProductDto>>> GetProducts()
-    {
-        var products = await _context.Products
-            .Select(p => new ProductDto
-            {
-                ProductId = p.ProductId,
-                ProductName = p.ProductName,
-                Unit = p.Unit,
-                StockQuantity = p.StockQuantity
-            })
-            .ToListAsync();
-
-        return Ok(products);
-    }
-
-    /// <summary>
-    /// GET: api/products/stock
-    /// Stock Query endpoint: Retrieve current stock quantities for all products.
-    /// </summary>
+    public async Task<IActionResult> GetProducts(int? warehouseId = null) => Ok(await Query(warehouseId).OrderBy(p => p.ProductId).ToListAsync());
     [HttpGet("stock")]
-    public async Task<ActionResult<IEnumerable<ProductStockDto>>> GetAllProductsStock()
-    {
-        var stocks = await _context.Products
-            .Select(p => new ProductStockDto
-            {
-                ProductId = p.ProductId,
-                ProductName = p.ProductName,
-                Unit = p.Unit,
-                StockQuantity = p.StockQuantity
-            })
-            .ToListAsync();
-
-        return Ok(stocks);
-    }
-
-    /// <summary>
-    /// GET: api/products/{id}
-    /// Retrieve a single product by its ID.
-    /// </summary>
+    public async Task<IActionResult> GetAllProductsStock(int? warehouseId = null) => Ok(await Query(warehouseId).ToListAsync());
     [HttpGet("{id:int}")]
-    public async Task<ActionResult<ProductDto>> GetProductById(int id)
+    public async Task<IActionResult> GetProductById(int id)
     {
-        var product = await _context.Products.FindAsync(id);
-
-        if (product == null)
-        {
-            return NotFound(new { message = $"Product with ID {id} was not found." });
-        }
-
-        var productDto = new ProductDto
-        {
-            ProductId = product.ProductId,
-            ProductName = product.ProductName,
-            Unit = product.Unit,
-            StockQuantity = product.StockQuantity
-        };
-
-        return Ok(productDto);
+        var product = await Query().FirstOrDefaultAsync(p => p.ProductId == id);
+        return product == null ? NotFound(new { message = "Sản phẩm không tồn tại." }) : Ok(product);
     }
-
-    /// <summary>
-    /// GET: api/products/{id}/stock
-    /// Stock Query endpoint: Retrieve the current stock quantity of a specific product by ID.
-    /// </summary>
     [HttpGet("{id:int}/stock")]
-    public async Task<ActionResult<ProductStockDto>> GetProductStock(int id)
-    {
-        var product = await _context.Products.FindAsync(id);
-
-        if (product == null)
-        {
-            return NotFound(new { message = $"Product with ID {id} was not found." });
-        }
-
-        var stockDto = new ProductStockDto
-        {
-            ProductId = product.ProductId,
-            ProductName = product.ProductName,
-            Unit = product.Unit,
-            StockQuantity = product.StockQuantity
-        };
-
-        return Ok(stockDto);
-    }
-
-    /// <summary>
-    /// POST: api/products
-    /// Create a new product in the catalog.
-    /// </summary>
+    public Task<IActionResult> GetProductStock(int id) => GetProductById(id);
     [HttpPost]
-    public async Task<ActionResult<ProductDto>> CreateProduct([FromBody] CreateProductDto dto)
+    public async Task<IActionResult> CreateProduct(CreateProductDto dto)
     {
-        if (!ModelState.IsValid)
+        var name = dto.ProductName.Trim(); var unit = dto.Unit.Trim();
+        if (name.Length == 0 || unit.Length == 0) return BadRequest(new { message = "Tên sản phẩm và đơn vị không được để trống." });
+        if (await db.Products.AnyAsync(p => p.ProductName.ToLower() == name.ToLower())) return BadRequest(new { message = "Tên sản phẩm đã tồn tại." });
+        ProductDto? result;
+        if (dto.StockQuantity > 0)
         {
-            return BadRequest(ModelState);
+            var confirmed = await inventory.ConfirmAndSaveTransactionAsync(new() { TransactionType = "Receive", CreateNewProduct = true, ProductName = name, Unit = unit, Quantity = dto.StockQuantity, WarehouseId = dto.WarehouseId, SupplierId = dto.SupplierId });
+            if (!confirmed.Success) return BadRequest(new { message = confirmed.Message });
+            result = await Query().SingleAsync(p => p.ProductId == confirmed.ProductId);
         }
-
-        // Check if product name already exists
-        var existingProduct = await _context.Products
-            .FirstOrDefaultAsync(p => p.ProductName.ToLower() == dto.ProductName.Trim().ToLower());
-
-        if (existingProduct != null)
+        else
         {
-            return BadRequest(new { message = $"A product with the name '{dto.ProductName}' already exists." });
+            var product = new Product { ProductName = name, Unit = unit, StockQuantity = 0 }; db.Products.Add(product); await db.SaveChangesAsync();
+            result = await Query().SingleAsync(p => p.ProductId == product.ProductId);
         }
-
-        var product = new Product
-        {
-            ProductName = dto.ProductName.Trim(),
-            Unit = dto.Unit.Trim(),
-            StockQuantity = dto.StockQuantity
-        };
-
-        _context.Products.Add(product);
-        await _context.SaveChangesAsync();
-
-        var resultDto = new ProductDto
-        {
-            ProductId = product.ProductId,
-            ProductName = product.ProductName,
-            Unit = product.Unit,
-            StockQuantity = product.StockQuantity
-        };
-
-        return CreatedAtAction(nameof(GetProductById), new { id = product.ProductId }, resultDto);
+        return CreatedAtAction(nameof(GetProductById), new { id = result.ProductId }, result);
     }
-
-    /// <summary>
-    /// PUT: api/products/{id}
-    /// Update an existing product's information.
-    /// </summary>
     [HttpPut("{id:int}")]
-    public async Task<ActionResult<ProductDto>> UpdateProduct(int id, [FromBody] UpdateProductDto dto)
+    public async Task<IActionResult> UpdateProduct(int id, UpdateProductDto dto)
     {
-        if (!ModelState.IsValid)
-        {
-            return BadRequest(ModelState);
-        }
-
-        var product = await _context.Products.FindAsync(id);
-        if (product == null)
-        {
-            return NotFound(new { message = $"Product with ID {id} was not found." });
-        }
-
-        // Check if updating name duplicates another product
-        var duplicateName = await _context.Products
-            .AnyAsync(p => p.ProductId != id && p.ProductName.ToLower() == dto.ProductName.Trim().ToLower());
-
-        if (duplicateName)
-        {
-            return BadRequest(new { message = $"Another product with the name '{dto.ProductName}' already exists." });
-        }
-
-        product.ProductName = dto.ProductName.Trim();
-        product.Unit = dto.Unit.Trim();
-        product.StockQuantity = dto.StockQuantity;
-
-        await _context.SaveChangesAsync();
-
-        var updatedDto = new ProductDto
-        {
-            ProductId = product.ProductId,
-            ProductName = product.ProductName,
-            Unit = product.Unit,
-            StockQuantity = product.StockQuantity
-        };
-
-        return Ok(updatedDto);
+        var product = await db.Products.FindAsync(id);
+        if (product == null) return NotFound(new { message = "Sản phẩm không tồn tại." });
+        if (dto.StockQuantity != product.StockQuantity) return BadRequest(new { message = "Không sửa trực tiếp số tồn. Hãy nhập/xuất hoặc chuyển kho để cập nhật tồn và lưu lịch sử." });
+        var name = dto.ProductName.Trim(); var unit = dto.Unit.Trim();
+        if (name.Length == 0 || unit.Length == 0) return BadRequest(new { message = "Tên và đơn vị không được để trống." });
+        if (await db.Products.AnyAsync(p => p.ProductId != id && p.ProductName.ToLower() == name.ToLower())) return BadRequest(new { message = "Tên sản phẩm đã tồn tại." });
+        if (unit != product.Unit && await db.InventoryTransactions.AnyAsync(t => t.ProductId == id)) return BadRequest(new { message = "Không đổi đơn vị của sản phẩm đã có giao dịch." });
+        product.ProductName = name; product.Unit = unit; await db.SaveChangesAsync(); return Ok(await Query().SingleAsync(p => p.ProductId == id));
     }
-
-    /// <summary>
-    /// DELETE: api/products/{id}
-    /// Delete a product from the catalog.
-    /// Prevents deletion if the product has associated inventory transactions.
-    /// </summary>
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> DeleteProduct(int id)
     {
-        var product = await _context.Products.FindAsync(id);
-        if (product == null)
-        {
-            return NotFound(new { message = $"Product with ID {id} was not found." });
-        }
-
-        // Check referential integrity with inventory transactions
-        var hasTransactions = await _context.InventoryTransactions
-            .AnyAsync(t => t.ProductId == id);
-
-        if (hasTransactions)
-        {
-            return BadRequest(new
-            {
-                message = $"Cannot delete product '{product.ProductName}' because it has existing inventory transaction records."
-            });
-        }
-
-        _context.Products.Remove(product);
-        await _context.SaveChangesAsync();
-
-        return Ok(new { message = $"Product '{product.ProductName}' has been successfully deleted." });
+        var product = await db.Products.FindAsync(id);
+        if (product == null) return NotFound(new { message = "Sản phẩm không tồn tại." });
+        if (product.StockQuantity > 0 || await db.InventoryTransactions.AnyAsync(t => t.ProductId == id)) return BadRequest(new { message = "Không thể xóa sản phẩm còn tồn hoặc đã có lịch sử giao dịch." });
+        db.WarehouseStocks.RemoveRange(await db.WarehouseStocks.Where(s => s.ProductId == id).ToListAsync()); db.Products.Remove(product); await db.SaveChangesAsync(); return Ok(new { message = "Đã xóa sản phẩm." });
     }
 }

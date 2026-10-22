@@ -29,11 +29,22 @@ public class WarehousesController : ControllerBase
             {
                 WarehouseId = w.WarehouseId,
                 WarehouseName = w.WarehouseName,
+                IsUnallocated = w.IsUnallocated,
+                ProductCount = w.WarehouseStocks.Count(s => s.Quantity > 0),
                 TransactionCount = w.InventoryTransactions.Count()
             })
             .ToListAsync();
 
         return Ok(warehouses);
+    }
+
+    [HttpGet("{id:int}/stock")]
+    public async Task<IActionResult> GetStock(int id)
+    {
+        if (!await _context.Warehouses.AnyAsync(w => w.WarehouseId == id)) return NotFound(new { message = "Kho không tồn tại." });
+        return Ok(await _context.WarehouseStocks.AsNoTracking().Where(s => s.WarehouseId == id)
+            .Select(s => new WarehouseStockDto { ProductId = s.ProductId, ProductName = s.Product.ProductName, WarehouseId = s.WarehouseId, WarehouseName = s.Warehouse.WarehouseName, Quantity = s.Quantity, Unit = s.Product.Unit, IsUnallocated = s.Warehouse.IsUnallocated })
+            .OrderBy(s => s.ProductName).ToListAsync());
     }
 
     /// <summary>
@@ -89,6 +100,7 @@ public class WarehousesController : ControllerBase
             return NotFound(new { message = $"Warehouse #{id} not found." });
         }
 
+        if (warehouse.IsUnallocated) return BadRequest(new { message = "Không thể đổi tên kho chờ phân bổ của hệ thống." });
         var normalizedName = dto.WarehouseName.Trim();
         var isDuplicate = await _context.Warehouses
             .AnyAsync(w => w.WarehouseId != id && w.WarehouseName.ToLower() == normalizedName.ToLower());
@@ -120,6 +132,8 @@ public class WarehousesController : ControllerBase
             return NotFound(new { message = $"Warehouse #{id} not found." });
         }
 
+        if (warehouse.IsUnallocated || await _context.WarehouseStocks.AnyAsync(s => s.WarehouseId == id && s.Quantity > 0))
+            return BadRequest(new { message = "Không thể xóa kho hệ thống hoặc kho vẫn còn hàng." });
         var hasTransactions = await _context.InventoryTransactions.AnyAsync(t => t.WarehouseId == id);
         if (hasTransactions)
         {
@@ -127,6 +141,7 @@ public class WarehousesController : ControllerBase
         }
 
         _context.Warehouses.Remove(warehouse);
+        _context.WarehouseStocks.RemoveRange(await _context.WarehouseStocks.Where(s => s.WarehouseId == id).ToListAsync());
         await _context.SaveChangesAsync();
 
         return Ok(new { message = $"Warehouse '{warehouse.WarehouseName}' successfully deleted." });

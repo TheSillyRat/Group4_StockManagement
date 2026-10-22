@@ -163,7 +163,7 @@ export default function Dashboard({
       <div className="dashboard-summary">
         <span>
           <Icon name="warehouse" size={16} />
-          {warehouses.length} điểm kho
+          {warehouses.filter((w) => !w.isUnallocated).length} điểm kho
         </span>
         <span>
           <Icon name="history" size={16} />

@@ -14,8 +14,8 @@ public class CatalogAiService(HttpClient client, IConfiguration configuration)
         var system = """
             You fill a SINGLE catalog creation form from a Vietnamese or English chat.
             Extract from the whole conversation, applying the latest corrections. Only extract the entity type specified below.
-            Return ONLY JSON: {"productName":null,"unit":null,"stockQuantity":null,"warehouseName":null,"isAmbiguous":false,"message":"Vietnamese reply"}.
-            For product: preserve exact product name, extract unit and non-negative integer initial stock.
+            Return ONLY JSON: {"productName":null,"unit":null,"stockQuantity":null,"warehouseName":null,"supplierName":null,"isAmbiguous":false,"message":"Vietnamese reply"}.
+            For product: preserve exact product name, extract unit, non-negative integer initial stock, and supplierName/warehouseName if mentioned for an initial receipt. Never invent supplier or warehouse.
             Never confuse numbers in names (Solar Panel 400W) with stock quantity. Do not invent units.
             Product essentials are name and unit. Stock is optional: if omitted return null and use the form default zero, not an ambiguity.
             If unit is omitted return null and ask.
@@ -44,12 +44,11 @@ public class CatalogAiService(HttpClient client, IConfiguration configuration)
         result.AlreadyExists = false;
         var missing = new List<string>();
         if (input.EntityType == "product") {
-            result.WarehouseName = null;
             if (string.IsNullOrWhiteSpace(result.ProductName) || result.ProductName.Length > 200) { result.ProductName = null; missing.Add("tên sản phẩm (tối đa 200 ký tự)"); }
             if (string.IsNullOrWhiteSpace(result.Unit) || result.Unit.Length > 50) { result.Unit = null; missing.Add("đơn vị tính (tối đa 50 ký tự)"); }
             if (result.StockQuantity < 0) { result.StockQuantity = null; missing.Add("số lượng tồn ban đầu là số nguyên không âm"); result.IsAmbiguous = true; }
         } else {
-            result.ProductName = result.Unit = null; result.StockQuantity = null;
+            result.ProductName = result.Unit = result.SupplierName = null; result.StockQuantity = null;
             if (string.IsNullOrWhiteSpace(result.WarehouseName) || result.WarehouseName.Length > 200) { result.WarehouseName = null; missing.Add("tên kho hàng (tối đa 200 ký tự)"); }
         }
         result.IsComplete = missing.Count == 0 && !result.IsAmbiguous;

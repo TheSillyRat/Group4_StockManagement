@@ -13,6 +13,7 @@ const groups = [
     [
       { id: "products", label: "Sản phẩm", icon: "box" },
       { id: "warehouses", label: "Kho hàng", icon: "warehouse" },
+      { id: "suppliers", label: "Nhà cung cấp", icon: "box" },
     ],
   ],
   [
