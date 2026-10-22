@@ -1,14 +1,14 @@
 using webAPI.DTOs;
-using webAPI.Entities;
 
 namespace webAPI.Services;
 
 /// <summary>
-/// Service interface for Inventory operations, validation and DB transactions (R3, R5)
+/// Service interface for Inventory operations, validation and DB transactions (R3, R4, R5)
+/// Maintained collaboratively by Sang Huỳnh (Validation) and Tài (Transactions & Stock Updates).
 /// </summary>
 public interface IInventoryService
 {
     Task<ExtractedTransactionDto> ValidateExtractedDataAsync(ExtractedTransactionDto dto);
-    Task<bool> ConfirmAndSaveTransactionAsync(ConfirmTransactionRequest request);
+    Task<ConfirmResult> ConfirmAndSaveTransactionAsync(ConfirmTransactionRequest request);
     Task<IEnumerable<TransactionHistoryDto>> GetTransactionHistoryAsync();
 }

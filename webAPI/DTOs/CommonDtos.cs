@@ -19,3 +19,11 @@ public class SupplierDto
     public int SupplierId { get; set; }
     public string SupplierName { get; set; } = string.Empty;
 }
+
+public class ConfirmResult
+{
+    public bool Success { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public int? TransactionId { get; set; }
+    public int? NewStockQuantity { get; set; }
+}
