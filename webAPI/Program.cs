@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using webAPI.Data;
 using webAPI.Services;
 
@@ -13,7 +13,11 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowReactApp", policy =>
     {
+<<<<<<< HEAD
+        policy.WithOrigins("http://localhost:5173")
+=======
         policy.SetIsOriginAllowed(origin => new Uri(origin).Host == "localhost")
+>>>>>>> origin/main
               .AllowAnyHeader()
               .AllowAnyMethod();
     });
@@ -49,3 +53,4 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+

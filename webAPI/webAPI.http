@@ -1,18 +1,121 @@
 @webAPI_HostAddress = http://localhost:5000
 
-### 1. Get All Products
+### ========================================================
+### 1. PRODUCTS & STOCK QUERY API (R3)
+### ========================================================
+
+### 1.1 Get All Products (Includes Stock Quantities)
 GET {{webAPI_HostAddress}}/api/products
 Accept: application/json
 
-### 2. Get All Warehouses
-GET {{webAPI_HostAddress}}/api/warehouses
+### 1.2 Get Product By ID
+GET {{webAPI_HostAddress}}/api/products/1
 Accept: application/json
 
-### 3. Get All Suppliers
+### 1.3 Query Stock of All Products (R3 Stock Query)
+GET {{webAPI_HostAddress}}/api/products/stock
+Accept: application/json
+
+### 1.4 Query Stock of a Specific Product by ID (R3 Stock Query)
+GET {{webAPI_HostAddress}}/api/products/1/stock
+Accept: application/json
+
+### 1.5 Create New Product
+POST {{webAPI_HostAddress}}/api/products
+Content-Type: application/json
+
+{
+  "productName": "Wireless Bluetooth Scanner",
+  "unit": "item",
+  "stockQuantity": 75
+}
+
+### 1.5 Update Existing Product
+PUT {{webAPI_HostAddress}}/api/products/1
+Content-Type: application/json
+
+{
+  "productName": "Product A",
+  "unit": "box",
+  "stockQuantity": 100
+}
+
+### 1.6 Delete Product
+DELETE {{webAPI_HostAddress}}/api/products/11
+Accept: application/json
+
+
+### ========================================================
+### 2. SUPPLIERS API (R3)
+### ========================================================
+
+### 2.1 Get All Suppliers
 GET {{webAPI_HostAddress}}/api/suppliers
 Accept: application/json
 
-### 4. AI Inventory Data Extraction (Example Test Case 1)
+### 2.2 Get Supplier By ID
+GET {{webAPI_HostAddress}}/api/suppliers/1
+Accept: application/json
+
+### 2.3 Create New Supplier
+POST {{webAPI_HostAddress}}/api/suppliers
+Content-Type: application/json
+
+{
+  "supplierName": "NexGen Logistics Supply Ltd"
+}
+
+### 2.4 Update Supplier
+PUT {{webAPI_HostAddress}}/api/suppliers/1
+Content-Type: application/json
+
+{
+  "supplierName": "Supplier X"
+}
+
+### 2.5 Delete Supplier
+DELETE {{webAPI_HostAddress}}/api/suppliers/11
+Accept: application/json
+
+
+### ========================================================
+### 3. WAREHOUSES API (R3)
+### ========================================================
+
+### 3.1 Get All Warehouses
+GET {{webAPI_HostAddress}}/api/warehouses
+Accept: application/json
+
+### 3.2 Get Warehouse By ID
+GET {{webAPI_HostAddress}}/api/warehouses/1
+Accept: application/json
+
+### 3.3 Create New Warehouse
+POST {{webAPI_HostAddress}}/api/warehouses
+Content-Type: application/json
+
+{
+  "warehouseName": "Quy Nhon Coastal Depot"
+}
+
+### 3.4 Update Warehouse
+PUT {{webAPI_HostAddress}}/api/warehouses/1
+Content-Type: application/json
+
+{
+  "warehouseName": "Binh Tan Warehouse"
+}
+
+### 3.5 Delete Warehouse
+DELETE {{webAPI_HostAddress}}/api/warehouses/11
+Accept: application/json
+
+
+### ========================================================
+### 4. AI EXTRACTION & TRANSACTIONS (R4 & R5)
+### ========================================================
+
+### 4.1 AI Inventory Data Extraction (Receive)
 POST {{webAPI_HostAddress}}/api/inventory/ai-extract
 Content-Type: application/json
 
@@ -20,7 +123,23 @@ Content-Type: application/json
   "prompt": "Receive 20 boxes of Product A from Supplier X into Binh Tan Warehouse."
 }
 
-### 5. Confirm Transaction
+### 4.2 AI Inventory Data Extraction (Dispatch)
+POST {{webAPI_HostAddress}}/api/inventory/ai-extract
+Content-Type: application/json
+
+{
+  "prompt": "Dispatch 15 boxes of Product A from Binh Tan Warehouse."
+}
+
+### 4.3 AI Inventory Data Extraction (Ambiguous input)
+POST {{webAPI_HostAddress}}/api/inventory/ai-extract
+Content-Type: application/json
+
+{
+  "prompt": "Send some items to warehouse."
+}
+
+### 4.4 Confirm Transaction
 POST {{webAPI_HostAddress}}/api/inventory/confirm
 Content-Type: application/json
 
@@ -32,6 +151,6 @@ Content-Type: application/json
   "quantity": 20
 }
 
-### 6. Get Transaction History
+### 4.5 Get Transaction History
 GET {{webAPI_HostAddress}}/api/inventory/history
 Accept: application/json
