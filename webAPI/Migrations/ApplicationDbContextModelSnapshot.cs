@@ -107,6 +107,55 @@ namespace webAPI.Migrations
                             ProductName = "Product C",
                             StockQuantity = 200,
                             Unit = "kg"
+                        },
+                        new
+                        {
+                            ProductId = 4,
+                            ProductName = "Solar Panel 400W",
+                            StockQuantity = 80,
+                            Unit = "item"
+                        },
+                        new
+                        {
+                            ProductId = 5,
+                            ProductName = "Industrial Steel Bolts",
+                            StockQuantity = 500,
+                            Unit = "box"
+                        },
+                        new
+                        {
+                            ProductId = 6,
+                            ProductName = "Premium Arabica Coffee",
+                            StockQuantity = 350,
+                            Unit = "kg"
+                        },
+                        new
+                        {
+                            ProductId = 7,
+                            ProductName = "Electric Cable 50m",
+                            StockQuantity = 120,
+                            Unit = "roll"
+                        },
+                        new
+                        {
+                            ProductId = 8,
+                            ProductName = "Ergonomic Office Chair",
+                            StockQuantity = 45,
+                            Unit = "item"
+                        },
+                        new
+                        {
+                            ProductId = 9,
+                            ProductName = "Heavy Duty Packaging Box",
+                            StockQuantity = 300,
+                            Unit = "pack"
+                        },
+                        new
+                        {
+                            ProductId = 10,
+                            ProductName = "Organic Green Tea",
+                            StockQuantity = 150,
+                            Unit = "kg"
                         });
                 });
 
@@ -137,6 +186,46 @@ namespace webAPI.Migrations
                         {
                             SupplierId = 2,
                             SupplierName = "Supplier Y"
+                        },
+                        new
+                        {
+                            SupplierId = 3,
+                            SupplierName = "Global Logistics Supply Ltd"
+                        },
+                        new
+                        {
+                            SupplierId = 4,
+                            SupplierName = "Prime Industrial Materials Co"
+                        },
+                        new
+                        {
+                            SupplierId = 5,
+                            SupplierName = "Apex Electronics Partner"
+                        },
+                        new
+                        {
+                            SupplierId = 6,
+                            SupplierName = "Delta Packaging Solutions"
+                        },
+                        new
+                        {
+                            SupplierId = 7,
+                            SupplierName = "Green Farm Agriculture Co"
+                        },
+                        new
+                        {
+                            SupplierId = 8,
+                            SupplierName = "Sunrise Wholesale Corp"
+                        },
+                        new
+                        {
+                            SupplierId = 9,
+                            SupplierName = "Horizon Steel & Metals"
+                        },
+                        new
+                        {
+                            SupplierId = 10,
+                            SupplierName = "Pacific Trade Logistics"
                         });
                 });
 
@@ -172,6 +261,41 @@ namespace webAPI.Migrations
                         {
                             WarehouseId = 3,
                             WarehouseName = "Tan Binh Warehouse"
+                        },
+                        new
+                        {
+                            WarehouseId = 4,
+                            WarehouseName = "District 7 Central Warehouse"
+                        },
+                        new
+                        {
+                            WarehouseId = 5,
+                            WarehouseName = "Long An Distribution Center"
+                        },
+                        new
+                        {
+                            WarehouseId = 6,
+                            WarehouseName = "Da Nang Transit Hub"
+                        },
+                        new
+                        {
+                            WarehouseId = 7,
+                            WarehouseName = "Bac Ninh High-Tech Warehouse"
+                        },
+                        new
+                        {
+                            WarehouseId = 8,
+                            WarehouseName = "Hai Phong Port Facility"
+                        },
+                        new
+                        {
+                            WarehouseId = 9,
+                            WarehouseName = "Can Tho Regional Depot"
+                        },
+                        new
+                        {
+                            WarehouseId = 10,
+                            WarehouseName = "Dong Nai Logistics Park"
                         });
                 });
 

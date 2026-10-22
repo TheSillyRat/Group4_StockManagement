@@ -37,22 +37,46 @@ public class ApplicationDbContext : DbContext
                   .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // Seed initial data for testing (Matches R2 & R6 test prompt)
+        // Seed 10 Product records (Retains Products 1-3 to match R2 & R6 test benchmarks)
         modelBuilder.Entity<Product>().HasData(
             new Product { ProductId = 1, ProductName = "Product A", Unit = "box", StockQuantity = 100 },
             new Product { ProductId = 2, ProductName = "Product B", Unit = "box", StockQuantity = 50 },
-            new Product { ProductId = 3, ProductName = "Product C", Unit = "kg", StockQuantity = 200 }
+            new Product { ProductId = 3, ProductName = "Product C", Unit = "kg", StockQuantity = 200 },
+            new Product { ProductId = 4, ProductName = "Solar Panel 400W", Unit = "item", StockQuantity = 80 },
+            new Product { ProductId = 5, ProductName = "Industrial Steel Bolts", Unit = "box", StockQuantity = 500 },
+            new Product { ProductId = 6, ProductName = "Premium Arabica Coffee", Unit = "kg", StockQuantity = 350 },
+            new Product { ProductId = 7, ProductName = "Electric Cable 50m", Unit = "roll", StockQuantity = 120 },
+            new Product { ProductId = 8, ProductName = "Ergonomic Office Chair", Unit = "item", StockQuantity = 45 },
+            new Product { ProductId = 9, ProductName = "Heavy Duty Packaging Box", Unit = "pack", StockQuantity = 300 },
+            new Product { ProductId = 10, ProductName = "Organic Green Tea", Unit = "kg", StockQuantity = 150 }
         );
 
+        // Seed 10 Supplier records (Retains Suppliers 1-2 to match R2 & R6 test benchmarks)
         modelBuilder.Entity<Supplier>().HasData(
             new Supplier { SupplierId = 1, SupplierName = "Supplier X" },
-            new Supplier { SupplierId = 2, SupplierName = "Supplier Y" }
+            new Supplier { SupplierId = 2, SupplierName = "Supplier Y" },
+            new Supplier { SupplierId = 3, SupplierName = "Global Logistics Supply Ltd" },
+            new Supplier { SupplierId = 4, SupplierName = "Prime Industrial Materials Co" },
+            new Supplier { SupplierId = 5, SupplierName = "Apex Electronics Partner" },
+            new Supplier { SupplierId = 6, SupplierName = "Delta Packaging Solutions" },
+            new Supplier { SupplierId = 7, SupplierName = "Green Farm Agriculture Co" },
+            new Supplier { SupplierId = 8, SupplierName = "Sunrise Wholesale Corp" },
+            new Supplier { SupplierId = 9, SupplierName = "Horizon Steel & Metals" },
+            new Supplier { SupplierId = 10, SupplierName = "Pacific Trade Logistics" }
         );
 
+        // Seed 10 Warehouse records (Retains Warehouses 1-3 to match R2 & R6 test benchmarks)
         modelBuilder.Entity<Warehouse>().HasData(
             new Warehouse { WarehouseId = 1, WarehouseName = "Binh Tan Warehouse" },
             new Warehouse { WarehouseId = 2, WarehouseName = "Thu Duc Warehouse" },
-            new Warehouse { WarehouseId = 3, WarehouseName = "Tan Binh Warehouse" }
+            new Warehouse { WarehouseId = 3, WarehouseName = "Tan Binh Warehouse" },
+            new Warehouse { WarehouseId = 4, WarehouseName = "District 7 Central Warehouse" },
+            new Warehouse { WarehouseId = 5, WarehouseName = "Long An Distribution Center" },
+            new Warehouse { WarehouseId = 6, WarehouseName = "Da Nang Transit Hub" },
+            new Warehouse { WarehouseId = 7, WarehouseName = "Bac Ninh High-Tech Warehouse" },
+            new Warehouse { WarehouseId = 8, WarehouseName = "Hai Phong Port Facility" },
+            new Warehouse { WarehouseId = 9, WarehouseName = "Can Tho Regional Depot" },
+            new Warehouse { WarehouseId = 10, WarehouseName = "Dong Nai Logistics Park" }
         );
     }
 }
