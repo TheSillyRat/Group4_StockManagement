@@ -12,6 +12,7 @@ public class WarehouseDto
 {
     public int WarehouseId { get; set; }
     public string WarehouseName { get; set; } = string.Empty;
+    public int TransactionCount { get; set; }
 }
 
 public class SupplierDto
