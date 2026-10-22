@@ -1,13 +1,13 @@
 # AI-Powered Inventory Management System
 
-A full-stack enterprise web application for the Generative AI course. This system converts natural-language inventory requests into structured transactions using the Google Gemini API, validates data integrity against SQL Server via Entity Framework Core, and ensures ACID-compliant stock updates upon user confirmation.
+A full-stack enterprise web application for the Generative AI course. This system converts natural-language inventory requests into structured transactions using the DeepSeek Flash API, validates data integrity against SQL Server via Entity Framework Core, and ensures ACID-compliant stock updates upon user confirmation.
 
 ---
 
 ## 🛠 Technology Stack
 - **Backend:** ASP.NET Core Web API (.NET 10)
 - **Database:** Microsoft SQL Server with Entity Framework Core (Code-First)
-- **AI Service:** Google Gemini API (`Mscc.GenerativeAI`)
+- **AI Service:** DeepSeek Flash API (HTTP Chat Completions)
 - **Frontend:** React 18 + Vite
 - **API Documentation:** Swagger / OpenAPI
 
@@ -72,7 +72,7 @@ MiniProj/
 | :--- | :--- | :--- | :--- |
 | **Member 1** (Team Lead / Database & Core API) | **R1 (3 marks) & R3 (1.5 marks)** | - Execute Code-First migrations to generate SQL Server schema.<br>- Seed database with benchmark records (Product A, Supplier X, Binh Tan Warehouse).<br>- Implement CRUD API endpoints for Products, Warehouses, and Suppliers.<br>- Manage Git workflow and environment configurations. | `Entities/*`, `Data/ApplicationDbContext.cs`, `Controllers/ProductsController.cs`, `WarehousesController.cs`, `SuppliersController.cs` |
 | **Member 2** (Backend Logic & Consistency) | **R5 (2 marks) & R3 (1.5 marks)** | - Implement atomic Database Transactions (`BeginTransactionAsync`) guaranteeing stock & transaction consistency.<br>- Stock update logic: increment on Receive (+), decrement on Dispatch (-), reject insufficient inventory.<br>- Store confirmed transactions in SQL Server.<br>- Implement `GET /api/inventory/history` endpoint. | `Services/InventoryService.cs`, `Controllers/InventoryController.cs` (`confirm` & `history`) |
-| **Member 3** (AI & Gemini Integration) | **R4 (5 marks)** | - Securely retrieve `GEMINI_API_KEY` from environment variables.<br>- Build dynamic prompt for `Mscc.GenerativeAI` to output strict JSON (type, product, supplier, warehouse, quantity, unit).<br>- Handle ambiguity: request clarification instead of hallucinating values.<br>- Validate AI-extracted entities against SQL Server database. | `Services/GeminiService.cs`, `DTOs/ExtractedTransactionDto.cs`, `Controllers/InventoryController.cs` (`ai-extract`) |
+| **Member 3** (AI & Gemini Integration) | **R4 (5 marks)** | - Securely retrieve `DEEPSEEK_API_KEY` from environment variables.<br>- Build dynamic prompt for `Mscc.GenerativeAI` to output strict JSON (type, product, supplier, warehouse, quantity, unit).<br>- Handle ambiguity: request clarification instead of hallucinating values.<br>- Validate AI-extracted entities against SQL Server database. | `Services/GeminiService.cs`, `DTOs/ExtractedTransactionDto.cs`, `Controllers/InventoryController.cs` (`ai-extract`) |
 | **Member 4** (Frontend React Application) | **R2 (3 marks) & R6 (4 marks)** | - Develop 4 responsive React pages: Product Management, Warehouse Management, AI Inventory Entry, and Transaction History.<br>- Implement interactive Review & Edit Form for AI-extracted fields prior to submission.<br>- Prepare demonstration test cases: 3 valid prompts + 1 ambiguous prompt; prepare presentation slides/video. | All files in `webapp/` (`src/pages/*`, `src/components/*`, `src/services/api.js`) |
 
 ---
@@ -109,11 +109,10 @@ cd webAPI
 dotnet tool install --global dotnet-ef
 
 # Generate schema and apply migrations to SQL Server
-dotnet ef migrations add InitialCreate
 dotnet ef database update
 
 # Configure Gemini API Key in current shell session
-$env:GEMINI_API_KEY="Your_Gemini_API_Key_Here"
+$env:DEEPSEEK_API_KEY="Your_DeepSeek_API_Key_Here"
 
 # Run the API with Hot Reload
 dotnet watch
@@ -129,3 +128,9 @@ npm install
 npm run dev
 ```
 Access React UI at: `http://localhost:5173`.
+
+## UI and transaction verification
+
+See [TASK_REVIEW.md](TASK_REVIEW.md) for task status, integration checks, UI checks, and current data scope.
+
+Local API credentials can be set with DEEPSEEK_API_KEY or the ignored webAPI/appsettings.Local.json file. The API model is deepseek-flash. Vite proxies /api to localhost:5000; configure VITE_API_BASE_URL when deploying separately.

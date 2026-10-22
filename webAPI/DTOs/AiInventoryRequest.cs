@@ -6,5 +6,7 @@ namespace webAPI.DTOs;
 /// </summary>
 public class AiInventoryRequest
 {
+    [System.ComponentModel.DataAnnotations.Required]
+    [System.ComponentModel.DataAnnotations.StringLength(4000)]
     public string Prompt { get; set; } = string.Empty;
 }

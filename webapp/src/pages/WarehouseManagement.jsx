@@ -1,310 +1,312 @@
-import React, { useState, useEffect } from 'react';
-import { inventoryApi } from '../services/api';
-
-export default function WarehouseManagement() {
-  const [warehouses, setWarehouses] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [newWarehouseName, setNewWarehouseName] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [notification, setNotification] = useState(null);
-
-  useEffect(() => {
-    fetchWarehouses();
-  }, []);
-
-  const fetchWarehouses = async () => {
+﻿import React, { useEffect, useState, useRef } from "react";
+import { inventoryApi } from "../services/api";
+import Icon from "../components/Icon";
+import { Metric, Search, Empty, Pagination } from "../components/DataUI";
+export default function WarehouseManagement({ onDataChange }) {
+  const [warehouses, setWarehouses] = useState([]),
+    [loading, setLoading] = useState(true),
+    [notice, setNotice] = useState(null),
+    [search, setSearch] = useState(""),
+    [page, setPage] = useState(1),
+    [modal, setModal] = useState(null),
+    [name, setName] = useState(""),
+    [submitting, setSubmitting] = useState(false),
+    [formError, setFormError] = useState("");
+  const dialogRef = useRef(null),
+    returnFocus = useRef(null);
+  const load = async () => {
     setLoading(true);
     try {
-      const data = await inventoryApi.getWarehouses();
-      setWarehouses(data);
-    } catch (err) {
-      setNotification({
-        type: 'error',
-        text: 'Không thể tải danh sách kho: ' + (err.message || 'Lỗi kết nối máy chủ.')
-      });
+      setWarehouses(await inventoryApi.getWarehouses());
+      setPage(1);
+    } catch (e) {
+      setNotice({ type: "error", text: e.message });
     } finally {
       setLoading(false);
     }
   };
-
-  const handleCreateWarehouse = async (e) => {
+  useEffect(() => {
+    load();
+  }, []);
+  useEffect(() => {
+    if (!modal) return;
+    returnFocus.current = document.activeElement;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    dialogRef.current?.querySelector("input, button")?.focus();
+    const key = (e) => {
+      if (e.key === "Escape" && !submitting) setModal(null);
+      if (e.key === "Tab") {
+        const els = [
+          ...dialogRef.current.querySelectorAll(
+            "button:not(:disabled),input:not(:disabled)",
+          ),
+        ];
+        if (!els.length) {
+          e.preventDefault();
+          return;
+        }
+        const first = els[0],
+          last = els[els.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+        if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", key);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", key);
+      returnFocus.current?.focus();
+    };
+  }, [modal, submitting]);
+  const open = (value) => {
+    setModal(value);
+    setFormError("");
+    setName(value.warehouseName || "");
+  };
+  const save = async (e) => {
     e.preventDefault();
-    if (!newWarehouseName.trim()) {
-      setNotification({ type: 'error', text: 'Vui lòng nhập tên kho hàng.' });
-      return;
-    }
-
+    if (submitting) return;
     setSubmitting(true);
-    setNotification(null);
+    setFormError("");
     try {
-      await inventoryApi.createWarehouse({ warehouseName: newWarehouseName.trim() });
-      setNotification({
-        type: 'success',
-        text: `Đã thêm mới kho "${newWarehouseName.trim()}" thành công.`
+      if (modal.mode === "delete")
+        await inventoryApi.deleteWarehouse(modal.warehouseId);
+      else if (modal.mode === "edit")
+        await inventoryApi.updateWarehouse(modal.warehouseId, {
+          warehouseName: name.trim(),
+        });
+      else await inventoryApi.createWarehouse({ warehouseName: name.trim() });
+      setNotice({
+        type: "success",
+        text:
+          modal.mode === "delete"
+            ? "Đã xóa kho hàng."
+            : "Đã lưu thông tin kho hàng.",
       });
-      setNewWarehouseName('');
-      setShowAddModal(false);
-      await fetchWarehouses();
-    } catch (err) {
-      setNotification({
-        type: 'error',
-        text: err.message || 'Thêm kho thất bại.'
-      });
+      setModal(null);
+      await load();
+      onDataChange?.();
+    } catch (e) {
+      setFormError(e.message);
     } finally {
       setSubmitting(false);
     }
   };
-
-  const handleDeleteWarehouse = async (warehouse) => {
-    if (warehouse.transactionCount > 0) {
-      setNotification({
-        type: 'error',
-        text: `Không thể xóa kho "${warehouse.warehouseName}" vì kho này đã phát sinh ${warehouse.transactionCount} giao dịch trong hệ thống.`
-      });
-      return;
-    }
-
-    const confirmDelete = window.confirm(`Bạn có chắc chắn muốn xóa kho "${warehouse.warehouseName}"?`);
-    if (!confirmDelete) return;
-
-    try {
-      await inventoryApi.deleteWarehouse(warehouse.warehouseId);
-      setNotification({
-        type: 'success',
-        text: `Đã xóa kho "${warehouse.warehouseName}" thành công.`
-      });
-      await fetchWarehouses();
-    } catch (err) {
-      setNotification({
-        type: 'error',
-        text: err.message || 'Xóa kho thất bại.'
-      });
-    }
-  };
-
-  // Filtered warehouses by search term
-  const filteredWarehouses = warehouses.filter(w =>
-    w.warehouseName.toLowerCase().includes(searchTerm.toLowerCase().trim()) ||
-    w.warehouseId.toString().includes(searchTerm.trim())
+  const filtered = warehouses.filter((w) =>
+    `${w.warehouseId} ${w.warehouseName}`
+      .toLowerCase()
+      .includes(search.toLowerCase().trim()),
   );
-
-  // Statistics
-  const totalWarehouses = warehouses.length;
-  const totalTransactions = warehouses.reduce((acc, curr) => acc + (curr.transactionCount || 0), 0);
-  const mostActive = warehouses.slice().sort((a, b) => (b.transactionCount || 0) - (a.transactionCount || 0))[0];
-
   return (
-    <div>
-      {/* Metrics Summary Cards */}
+    <>
       <div className="stat-grid">
-        <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8' }}>
-            🏢
-          </div>
-          <div className="stat-info">
-            <span className="stat-value">{totalWarehouses}</span>
-            <span className="stat-label">Tổng Số Điểm Kho</span>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399' }}>
-            🔄
-          </div>
-          <div className="stat-info">
-            <span className="stat-value">{totalTransactions}</span>
-            <span className="stat-label">Tổng Giao Dịch Ghi Nhận</span>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24' }}>
-            ⭐
-          </div>
-          <div className="stat-info">
-            <span className="stat-value" style={{ fontSize: '1.15rem' }}>
-              {mostActive && mostActive.transactionCount > 0 ? mostActive.warehouseName : 'Chưa có dữ liệu'}
-            </span>
-            <span className="stat-label">
-              Kho Hoạt Động Nhiều Nhất {mostActive && mostActive.transactionCount > 0 ? `(${mostActive.transactionCount} lượt)` : ''}
-            </span>
-          </div>
-        </div>
+        <Metric
+          icon="warehouse"
+          value={warehouses.length}
+          label="Điểm kho trong hệ thống"
+        />
+        <Metric
+          icon="history"
+          value={warehouses.reduce((sum, w) => sum + w.transactionCount, 0)}
+          label="Giao dịch đã ghi nhận"
+        />
+        <Metric
+          icon="chart"
+          value={warehouses.filter((w) => w.transactionCount > 0).length}
+          label="Kho đã phát sinh giao dịch"
+        />
       </div>
-
-      {/* Main Warehouse Card */}
-      <div className="card">
+      <section className="card">
         <div className="card-header">
           <div>
-            <h2 className="card-title">🏢 Warehouse Management</h2>
-            <p className="card-subtitle" style={{ margin: '4px 0 0 0' }}>
-              Quản lý danh sách các địa điểm kho hàng, theo dõi giao dịch và đăng ký kho mới.
+            <h2 className="card-title">Danh sách kho hàng</h2>
+            <p className="card-subtitle">
+              Quản lý thông tin và địa điểm ghi nhận giao dịch.
             </p>
           </div>
-
-          <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ display: "flex", gap: 8 }}>
             <button
-              onClick={() => { setShowAddModal(true); setNotification(null); }}
-              className="btn btn-primary"
+              className="btn btn-outline"
+              disabled={loading}
+              onClick={load}
+              aria-label="Làm mới danh sách kho"
             >
-              + Thêm Kho Mới
+              <Icon name="refresh" size={16} />
             </button>
             <button
-              onClick={fetchWarehouses}
-              disabled={loading}
-              className="btn btn-outline"
+              className="btn btn-primary"
+              onClick={() => open({ mode: "create" })}
             >
-              {loading ? 'Đang tải...' : '🔄 Làm mới'}
+              <Icon name="plus" size={16} />
+              Thêm kho hàng
             </button>
           </div>
         </div>
-
-        {/* Notifications */}
-        {notification && (
-          <div className={`alert ${notification.type === 'error' ? 'alert-error' : 'alert-success'}`}>
-            <span>{notification.type === 'error' ? '❌' : '✅'}</span>
-            <div style={{ flex: 1 }}>{notification.text}</div>
-            <button
-              onClick={() => setNotification(null)}
-              style={{ background: 'transparent', color: 'inherit', fontWeight: 'bold' }}
-            >
-              ✕
-            </button>
+        {notice && (
+          <div className={`alert alert-${notice.type}`} role="status">
+            <Icon name={notice.type === "error" ? "alert" : "check"} />
+            <span>{notice.text}</span>
           </div>
         )}
-
-        {/* Search & Filter Toolbar */}
         <div className="toolbar">
-          <input
-            type="text"
-            className="search-input"
-            placeholder="🔍 Tìm kiếm theo tên kho hoặc ID..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+          <Search
+            value={search}
+            onChange={(v) => {
+              setSearch(v);
+              setPage(1);
+            }}
+            placeholder="Tìm tên hoặc mã kho hàng..."
           />
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-            Hiển thị <strong>{filteredWarehouses.length}</strong> / {totalWarehouses} kho
-          </span>
+          <span className="muted">{filtered.length} kho hàng</span>
         </div>
-
-        {/* Warehouses Table */}
-        {loading && warehouses.length === 0 ? (
-          <p style={{ padding: 24, textAlign: 'center', color: 'var(--text-secondary)' }}>
-            Đang tải danh sách kho...
-          </p>
+        {loading ? (
+          <Empty loading title="Đang tải kho hàng..." />
+        ) : !filtered.length ? (
+          <Empty
+            title="Không tìm thấy kho hàng"
+            description="Thêm kho mới hoặc thay đổi từ khóa tìm kiếm."
+          />
         ) : (
           <div className="table-responsive">
             <table className="table">
               <thead>
                 <tr>
-                  <th style={{ width: 80 }}>Mã Kho</th>
-                  <th>Tên Kho Hàng</th>
-                  <th style={{ width: 180 }}>Giao Dịch Ghi Nhận</th>
-                  <th style={{ width: 140 }}>Trạng Thái</th>
-                  <th style={{ width: 120, textAlign: 'center' }}>Thao Tác</th>
+                  <th>KHO HÀNG</th>
+                  <th>MÃ KHO</th>
+                  <th>GIAO DỊCH</th>
+                  <th>THAO TÁC</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredWarehouses.length === 0 ? (
-                  <tr>
-                    <td colSpan="5" style={{ textAlign: 'center', padding: 32, color: 'var(--text-secondary)' }}>
-                      {searchTerm ? 'Không tìm thấy kho nào phù hợp với từ khóa.' : 'Chưa có kho hàng nào được đăng ký.'}
+                {filtered.slice((page - 1) * 10, page * 10).map((w) => (
+                  <tr key={w.warehouseId}>
+                    <td>
+                      <div className="product-cell">
+                        <span>
+                          <Icon name="warehouse" size={18} />
+                        </span>
+                        <strong>{w.warehouseName}</strong>
+                      </div>
+                    </td>
+                    <td className="muted">
+                      KHO-{String(w.warehouseId).padStart(3, "0")}
+                    </td>
+                    <td>
+                      <span className="badge badge-neutral">
+                        {w.transactionCount} giao dịch
+                      </span>
+                    </td>
+                    <td>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          className="btn btn-outline"
+                          onClick={() => open({ ...w, mode: "edit" })}
+                        >
+                          Chỉnh sửa
+                        </button>
+                        <button
+                          className="btn btn-danger-outline"
+                          disabled={w.transactionCount > 0}
+                          title={
+                            w.transactionCount > 0
+                              ? "Kho đã có giao dịch, không thể xóa"
+                              : "Xóa kho"
+                          }
+                          onClick={() => open({ ...w, mode: "delete" })}
+                          aria-label={`Xóa ${w.warehouseName}`}
+                        >
+                          <Icon name="trash" size={15} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
-                ) : (
-                  filteredWarehouses.map(w => (
-                    <tr key={w.warehouseId}>
-                      <td style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>#{w.warehouseId}</td>
-                      <td>
-                        <strong style={{ color: 'var(--text-primary)', fontSize: '0.95rem' }}>
-                          🏢 {w.warehouseName}
-                        </strong>
-                      </td>
-                      <td>
-                        <span className={`badge ${w.transactionCount > 0 ? 'badge-receive' : 'badge-neutral'}`}>
-                          {w.transactionCount} giao dịch
-                        </span>
-                      </td>
-                      <td>
-                        <span className="badge badge-matched">
-                          ● Sẵn sàng
-                        </span>
-                      </td>
-                      <td style={{ textAlign: 'center' }}>
-                        <button
-                          onClick={() => handleDeleteWarehouse(w)}
-                          title={w.transactionCount > 0 ? 'Kho đã có giao dịch, không thể xóa' : 'Xóa kho hàng'}
-                          className="btn btn-danger-outline"
-                          style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-                        >
-                          🗑️ Xóa
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
+                ))}
               </tbody>
             </table>
           </div>
         )}
-      </div>
-
-      {/* Modal Add New Warehouse */}
-      {showAddModal && (
-        <div className="modal-overlay" onClick={() => !submitting && setShowAddModal(false)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ margin: 0, fontSize: '1.15rem', color: 'var(--text-primary)' }}>
-                🏢 Thêm Kho Hàng Mới
-              </h3>
-              <button
-                onClick={() => setShowAddModal(false)}
-                disabled={submitting}
-                style={{ background: 'transparent', color: 'var(--text-secondary)', fontSize: '1.2rem' }}
-              >
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateWarehouse}>
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 6 }}>
-                  Tên kho hàng <span style={{ color: 'var(--danger)' }}>*</span>
-                </label>
-                <input
-                  type="text"
-                  autoFocus
-                  style={{ width: '100%' }}
-                  placeholder="Ví dụ: Quang Trung Warehouse, Kho Tân Bình..."
-                  value={newWarehouseName}
-                  onChange={(e) => setNewWarehouseName(e.target.value)}
-                  disabled={submitting}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 }}>
+        <Pagination total={filtered.length} page={page} onChange={setPage} />
+      </section>
+      {modal && (
+        <div
+          className="modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !submitting) setModal(null);
+          }}
+        >
+          <section
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="warehouse-modal-title"
+            ref={dialogRef}
+          >
+            <h3 id="warehouse-modal-title">
+              {modal.mode === "delete"
+                ? "Xóa kho hàng?"
+                : modal.mode === "edit"
+                  ? "Chỉnh sửa kho hàng"
+                  : "Thêm kho hàng"}
+            </h3>
+            <p>
+              {modal.mode === "delete"
+                ? `Kho “${modal.warehouseName}” sẽ bị xóa khỏi danh mục. Thao tác này không thể hoàn tác.`
+                : "Đặt tên rõ ràng để dễ chọn khi nhập hoặc xuất hàng."}
+            </p>
+            <form onSubmit={save}>
+              {modal.mode !== "delete" && (
+                <div className="form-field">
+                  <label htmlFor="warehouse-name">Tên kho hàng *</label>
+                  <input
+                    id="warehouse-name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    maxLength={200}
+                    required
+                    disabled={submitting}
+                    placeholder="Ví dụ: Kho Bình Tân"
+                  />
+                </div>
+              )}
+              {formError && (
+                <p className="field-error" role="alert">
+                  {formError}
+                </p>
+              )}
+              <div className="modal-actions">
                 <button
                   type="button"
                   className="btn btn-outline"
-                  onClick={() => setShowAddModal(false)}
+                  onClick={() => setModal(null)}
                   disabled={submitting}
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
-                  className="btn btn-primary"
-                  disabled={submitting || !newWarehouseName.trim()}
+                  className={`btn ${modal.mode === "delete" ? "btn-danger-outline" : "btn-primary"}`}
+                  disabled={
+                    submitting || (modal.mode !== "delete" && !name.trim())
+                  }
                 >
-                  {submitting ? 'Đang lưu...' : 'Thêm Kho'}
+                  {submitting
+                    ? "Đang lưu..."
+                    : modal.mode === "delete"
+                      ? "Xóa kho hàng"
+                      : "Lưu kho hàng"}
                 </button>
               </div>
             </form>
-          </div>
+          </section>
         </div>
       )}
-    </div>
+    </>
   );
 }

@@ -11,6 +11,8 @@
 **/dist/
 .env
 .env.local
+**/appsettings.Local.json
+tests/artifacts/
 
 # OS
 .DS_Store

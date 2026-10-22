@@ -1,113 +1,159 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Mscc.GenerativeAI;
+using System.Net.Http.Headers;
 using webAPI.DTOs;
 
 namespace webAPI.Services;
 
 /// <summary>
-/// Implementation of Gemini AI Service (Requirement R4).
-/// Configures Mscc.GenerativeAI library, securely retrieves GEMINI_API_KEY from environment or appsettings,
-/// supports both Vietnamese and English inventory requests, and handles ambiguous data.
+/// Implementation of DeepSeek AI Service (Requirement R4 - Sang Huỳnh)
+/// Extracts structured transaction data from natural language, handles ambiguity,
+/// and falls back to deterministic extraction when offline or API key is absent.
 /// </summary>
 public class GeminiService : IGeminiService
 {
-    private readonly string _apiKey;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<GeminiService> _logger;
+    private readonly HttpClient _httpClient;
 
-    public GeminiService(IConfiguration configuration, ILogger<GeminiService> logger)
+    public GeminiService(IConfiguration configuration, ILogger<GeminiService> logger, HttpClient httpClient)
     {
+        _configuration = configuration;
         _logger = logger;
-        // R4.2 & R4.3: Securely retrieve API Key from environment variable or appsettings.json
-        _apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY")
-               ?? configuration["Gemini:ApiKey"]
-               ?? configuration["Gemini:apiKey"]
-               ?? string.Empty;
+        _httpClient = httpClient;
     }
-
-    private static ExtractedTransactionDto GetAmbiguousResult(string reason) => new()
-    {
-        IsAmbiguous = true,
-        ClarificationMessage = reason
-    };
 
     public async Task<ExtractedTransactionDto> ExtractInventoryDataAsync(string naturalLanguageText)
     {
         if (string.IsNullOrWhiteSpace(naturalLanguageText))
         {
-            return GetAmbiguousResult("Blank inventory request. Please enter a transaction description.");
+            return new ExtractedTransactionDto
+            {
+                IsAmbiguous = true,
+                ClarificationMessage = "Prompt is empty. Please enter an inventory request."
+            };
         }
 
-        string trimmedText = naturalLanguageText.Trim();
+        var trimmedText = naturalLanguageText.Trim();
 
-        // 1. If Gemini API Key is configured, attempt call via Mscc.GenerativeAI
-        if (!string.IsNullOrWhiteSpace(_apiKey))
+        // 1. Retrieve DEEPSEEK_API_KEY from environment or appsettings
+        var apiKey = Environment.GetEnvironmentVariable("DEEPSEEK_API_KEY");
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            apiKey = _configuration["DeepSeek:ApiKey"];
+        }
+
+        // 2. If API Key is configured, attempt call to DeepSeek
+        if (!string.IsNullOrWhiteSpace(apiKey))
         {
             try
             {
-                var googleAi = new GoogleAI(_apiKey);
-                var model = googleAi.GenerativeModel("gemini-1.5-flash");
-
-                string prompt = $$$"""
-                    Bạn là chuyên gia AI trích xuất thông tin giao dịch kho hàng từ yêu cầu ngôn ngữ tự nhiên (hỗ trợ cả tiếng Anh và tiếng Việt).
-                    Hãy phân tích yêu cầu kho sau: {{{trimmedText}}}
-
-                    Yêu cầu trả về duy nhất 1 chuỗi JSON theo đúng định dạng sau:
-                    {
-                        "transactionType": "Receive",
-                        "productName": "Product A",
-                        "supplierName": "Supplier X",
-                        "warehouseName": "Binh Tan Warehouse",
-                        "quantity": 20,
-                        "unit": "box",
-                        "isAmbiguous": false,
-                        "clarificationMessage": null
-                    }
-
-                    Lưu ý bắt buộc:
-                    1. "transactionType" chỉ nhận 1 trong 2 giá trị: "Receive" (cho các yêu cầu nhập, nhận, import, inbound) hoặc "Dispatch" (cho các yêu cầu xuất, gửi, export, send, outbound).
-                    2. "productName": Tên mặt hàng/sản phẩm (ví dụ: Product A, Product B, Thép, Cà phê...).
-                    3. "supplierName": Tên nhà cung cấp nếu có nhắc đến (ví dụ: Supplier X, Công ty Y; nếu là xuất kho hoặc không có nhà cung cấp thì để null).
-                    4. "warehouseName": Tên kho đích hoặc kho xuất (ví dụ: Binh Tan Warehouse, Thu Duc Warehouse...).
-                    5. "quantity": Số lượng (phải là số nguyên dương > 0).
-                    6. "unit": Đơn vị tính (ví dụ: box, kg, item, roll, pack, thùng, hộp, cái...).
-                    7. Xử lý mơ hồ: Nếu yêu cầu thiếu thông tin bắt buộc (thiếu tên sản phẩm cụ thể, thiếu số lượng, hoặc thiếu kho đích/nguồn, ví dụ: "Send some items to warehouse", "Nhập một ít hàng", "Chuyển đồ vào kho"), BẮT BUỘC đặt "isAmbiguous": true và giải thích rõ thông tin còn thiếu trong "clarificationMessage" bằng tiếng Anh (ví dụ: "Request is ambiguous. Missing product name and quantity. Please specify.").
-                    8. Trả về đúng định dạng JSON, không kèm theo bất kì ký tự nào khác ngoài JSON (không bọc trong ```json hay ```).
-                    """;
-
-                var response = await model.GenerateContent(prompt);
-                string rawText = response.Text?.Trim() ?? string.Empty;
-                string clearJson = rawText.Replace("```json", "").Replace("```", "").Trim();
-
-                if (!string.IsNullOrEmpty(clearJson))
+                var extracted = await CallDeepSeekApiAsync(apiKey, trimmedText);
+                if (extracted != null)
                 {
-                    var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                    var result = JsonSerializer.Deserialize<ExtractedTransactionDto>(clearJson, options);
-
-                    if (result != null)
-                    {
-                        PostProcessDto(result);
-                        return result;
-                    }
+                    PostProcessDto(extracted, trimmedText);
+                    return extracted;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Gemini API call encountered an error: {Message}. Falling back to deterministic rule-based extractor.", ex.Message);
+                _logger.LogWarning(ex, "DeepSeek API call failed. Falling back to deterministic rule-based extractor.");
             }
         }
         else
         {
-            _logger.LogInformation("No GEMINI_API_KEY provided in environment or appsettings. Using deterministic rule-based extractor.");
+            _logger.LogInformation("No DEEPSEEK_API_KEY provided. Using deterministic rule-based extraction fallback.");
         }
 
-        // 2. Fallback: Deterministic rule-based extraction for offline scenarios & tests
+        // 3. Fallback: Deterministic Rule-Based Extraction
         var fallbackDto = ExtractViaRules(trimmedText);
-        PostProcessDto(fallbackDto);
+        PostProcessDto(fallbackDto, trimmedText);
         return fallbackDto;
     }
 
-    private static void PostProcessDto(ExtractedTransactionDto dto)
+    private async Task<ExtractedTransactionDto?> CallDeepSeekApiAsync(string apiKey, string promptText)
+    {
+        var systemPrompt = @"You are an expert warehouse inventory extraction assistant.
+Analyze the user's natural language inventory request and extract structured transaction data.
+
+Return ONLY a valid JSON object with the following schema:
+{
+  ""transactionType"": ""Receive"" or ""Dispatch"",
+  ""productName"": ""<Name of product, e.g. Product A>"",
+  ""supplierName"": ""<Name of supplier if provided, e.g. Supplier X, otherwise null>"",
+  ""warehouseName"": ""<Name of warehouse, e.g. Binh Tan Warehouse>"",
+  ""quantity"": <positive integer, e.g. 20>,
+  ""unit"": ""<unit of measurement, e.g. box, kg, item>"",
+  ""isAmbiguous"": <boolean, true if any required detail is missing, vague, or unclear>,
+  ""clarificationMessage"": ""<clarification message explaining what is missing if isAmbiguous is true, otherwise null>""
+}
+
+Rules:
+1. Transaction type must be strictly ""Receive"" or ""Dispatch"".
+2. If the user request lacks essential details such as product name, target warehouse, or quantity (for example: ""Send some items to warehouse"", ""Nhập một ít hàng"", ""Move items""), set ""isAmbiguous"": true and provide a specific clarificationMessage listing what is missing.
+3. For ""Receive"" transactions, extract supplierName if mentioned. For ""Dispatch"" transactions, supplierName should be null unless explicitly stated.
+4. Quantity must be a positive integer > 0. If missing or non-numeric, mark ""isAmbiguous"": true.
+5. Return RAW JSON only, without markdown fences (no ```json or ```).";
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.deepseek.com/chat/completions");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        request.Content = JsonContent.Create(new
+        {
+            model = _configuration["DeepSeek:Model"] ?? "deepseek-flash",
+            messages = new[]
+            {
+                new { role = "system", content = systemPrompt },
+                new { role = "user", content = promptText }
+            },
+            thinking = new { type = "disabled" },
+            response_format = new { type = "json_object" },
+            max_tokens = 1024,
+            temperature = 0
+        });
+        using var response = await _httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        using var responseJson = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var choice = responseJson.RootElement.GetProperty("choices")[0];
+        if (choice.GetProperty("finish_reason").GetString() != "stop")
+            throw new InvalidOperationException("DeepSeek returned an incomplete extraction.");
+        var rawResponse = choice.GetProperty("message").GetProperty("content").GetString()?.Trim();
+
+        if (string.IsNullOrWhiteSpace(rawResponse))
+        {
+            return null;
+        }
+
+        // Clean markdown backticks if present
+        if (rawResponse.StartsWith("```json", StringComparison.OrdinalIgnoreCase))
+        {
+            rawResponse = rawResponse.Substring(7);
+        }
+        else if (rawResponse.StartsWith("```"))
+        {
+            rawResponse = rawResponse.Substring(3);
+        }
+
+        if (rawResponse.EndsWith("```"))
+        {
+            rawResponse = rawResponse.Substring(0, rawResponse.Length - 3);
+        }
+
+        rawResponse = rawResponse.Trim();
+
+        var options = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
+
+        var parsed = JsonSerializer.Deserialize<ExtractedTransactionDto>(rawResponse, options);
+        return parsed;
+    }
+
+    /// <summary>
+    /// Deterministic rule-based parser that handles standard benchmark test cases
+    /// and ambiguous input scenarios when Gemini API is unavailable or offline.
+    /// </summary>
+    private static void PostProcessDto(ExtractedTransactionDto dto, string originalText)
     {
         if (dto.IsAmbiguous)
         {
@@ -140,11 +186,6 @@ public class GeminiService : IGeminiService
         }
     }
 
-    /// <summary>
-    /// Deterministic rule-based parser that handles standard benchmark test cases
-    /// and ambiguous input scenarios when Gemini API is unavailable or offline.
-    /// Supports both English and Vietnamese prompt variations.
-    /// </summary>
     public static ExtractedTransactionDto ExtractViaRules(string text)
     {
         var dto = new ExtractedTransactionDto();
@@ -170,7 +211,7 @@ public class GeminiService : IGeminiService
         }
 
         // Parse Quantity and Unit
-        var qtyMatch = Regex.Match(text, @"\b(?<qty>\d+)\s*(?<unit>boxes|box|kg|cartons|carton|items|item|thùng|hộp|cái|gói|cuộn|pack|roll)?\b", RegexOptions.IgnoreCase);
+        var qtyMatch = Regex.Match(text, @"(?<![\w.,])(?<qty>[+-]?\d+(?:[.,]\d+)?)\s*(?<unit>boxes|box|kg|cartons|carton|items|item|thùng|hộp|cái|gói|cuộn|pack|roll)?\b", RegexOptions.IgnoreCase);
         if (qtyMatch.Success && int.TryParse(qtyMatch.Groups["qty"].Value, out int q))
         {
             dto.Quantity = q;

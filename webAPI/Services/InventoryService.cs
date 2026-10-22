@@ -29,6 +29,7 @@ public class InventoryService : IInventoryService
     /// </summary>
     public async Task<ExtractedTransactionDto> ValidateExtractedDataAsync(ExtractedTransactionDto dto)
     {
+        var unitMatches = true;
         if (dto.IsAmbiguous)
         {
             dto.ProductExists = false;
@@ -53,6 +54,7 @@ public class InventoryService : IInventoryService
                 {
                     dto.Unit = product.Unit;
                 }
+                unitMatches = string.Equals(dto.Unit.Trim(), product.Unit, StringComparison.OrdinalIgnoreCase);
             }
             else
             {
@@ -106,18 +108,20 @@ public class InventoryService : IInventoryService
         else
         {
             // Supplier is not required for Dispatch transactions
-            dto.SupplierExists = dto.TransactionType.Equals("Dispatch", StringComparison.OrdinalIgnoreCase);
+            dto.SupplierExists = string.Equals(dto.TransactionType, "Dispatch", StringComparison.OrdinalIgnoreCase);
         }
 
         // Overall validity determination
-        bool supplierCheck = dto.TransactionType.Equals("Dispatch", StringComparison.OrdinalIgnoreCase) || 
-                             dto.SupplierExists || 
+        bool supplierCheck = dto.SupplierExists ||
                              string.IsNullOrWhiteSpace(dto.SupplierName);
 
         dto.IsValid = !dto.IsAmbiguous &&
                       dto.ProductExists &&
                       dto.WarehouseExists &&
                       supplierCheck &&
+                      unitMatches &&
+                      (string.Equals(dto.TransactionType, "Receive", StringComparison.OrdinalIgnoreCase) ||
+                       string.Equals(dto.TransactionType, "Dispatch", StringComparison.OrdinalIgnoreCase)) &&
                       dto.Quantity > 0;
 
         return dto;
@@ -172,6 +176,12 @@ public class InventoryService : IInventoryService
             };
         }
 
+        if (!string.IsNullOrWhiteSpace(request.Unit) &&
+            !string.Equals(request.Unit.Trim(), product.Unit, StringComparison.OrdinalIgnoreCase))
+        {
+            return new ConfirmResult { Success = false, Message = $"Đơn vị tính phải là '{product.Unit}'. Hệ thống chưa hỗ trợ quy đổi đơn vị." };
+        }
+
         // 3. Resolve Warehouse
         Warehouse? warehouse = null;
         if (request.WarehouseId.HasValue && request.WarehouseId.Value > 0)
@@ -205,37 +215,35 @@ public class InventoryService : IInventoryService
             supplier = await _context.Suppliers.FirstOrDefaultAsync(s => s.SupplierName.ToLower() == sName);
         }
 
-        // 5. Atomic Database Transaction (TA-01, TA-02)
+        if ((request.SupplierId.HasValue || !string.IsNullOrWhiteSpace(request.SupplierName)) && supplier == null)
+            return new ConfirmResult { Success = false, Message = "Nhà cung cấp không tồn tại. Vui lòng chọn lại." };
+
+        // Update stock in SQL, under the same transaction as the history insert.
+        // A conditional UPDATE prevents lost updates and concurrent over-dispatch.
         using var dbTransaction = await _context.Database.BeginTransactionAsync();
         try
         {
             bool isReceive = normalizedType.Equals("Receive", StringComparison.OrdinalIgnoreCase);
 
+            var stockQuery = _context.Products.Where(p => p.ProductId == product.ProductId);
+            int affected;
             if (isReceive)
-            {
-                // Increment inventory stock on Receive
-                product.StockQuantity += request.Quantity;
-                _logger.LogInformation("Stock for Product '{ProductName}' incremented by {Quantity}. New balance: {NewBalance}",
-                    product.ProductName, request.Quantity, product.StockQuantity);
-            }
+                affected = await stockQuery
+                    .Where(p => p.StockQuantity <= int.MaxValue - request.Quantity)
+                    .ExecuteUpdateAsync(update => update.SetProperty(p => p.StockQuantity, p => p.StockQuantity + request.Quantity));
             else
-            {
-                // Verify sufficient inventory on Dispatch
-                if (product.StockQuantity < request.Quantity)
-                {
-                    await dbTransaction.RollbackAsync();
-                    return new ConfirmResult
-                    {
-                        Success = false,
-                        Message = $"Insufficient inventory for '{product.ProductName}'. Current available: {product.StockQuantity} {product.Unit}, Requested dispatch: {request.Quantity} {product.Unit}."
-                    };
-                }
+                affected = await stockQuery
+                    .Where(p => p.StockQuantity >= request.Quantity)
+                    .ExecuteUpdateAsync(update => update.SetProperty(p => p.StockQuantity, p => p.StockQuantity - request.Quantity));
 
-                // Decrement inventory stock on Dispatch
-                product.StockQuantity -= request.Quantity;
-                _logger.LogInformation("Stock for Product '{ProductName}' decremented by {Quantity}. New balance: {NewBalance}",
-                    product.ProductName, request.Quantity, product.StockQuantity);
+            if (affected != 1)
+            {
+                await dbTransaction.RollbackAsync();
+                return new ConfirmResult { Success = false, Message = isReceive
+                    ? "Số lượng tồn kho vượt giới hạn cho phép."
+                    : "Tồn kho không đủ để xuất số lượng yêu cầu. Vui lòng làm mới dữ liệu." };
             }
+            var newStock = await stockQuery.AsNoTracking().Select(p => p.StockQuantity).SingleAsync();
 
             // Create InventoryTransaction record
             var transactionRecord = new InventoryTransaction
@@ -257,9 +265,9 @@ public class InventoryService : IInventoryService
             return new ConfirmResult
             {
                 Success = true,
-                Message = $"Transaction #{transactionRecord.TransactionId} successfully confirmed. {product.ProductName} new stock: {product.StockQuantity} {product.Unit}.",
+                Message = $"Đã lưu giao dịch #{transactionRecord.TransactionId}. Tồn kho {product.ProductName}: {newStock} {product.Unit}.",
                 TransactionId = transactionRecord.TransactionId,
-                NewStockQuantity = product.StockQuantity
+                NewStockQuantity = newStock
             };
         }
         catch (Exception ex)
@@ -269,7 +277,7 @@ public class InventoryService : IInventoryService
             return new ConfirmResult
             {
                 Success = false,
-                Message = $"Transaction failed due to an internal error: {ex.Message}"
+                Message = "Không thể lưu giao dịch. Dữ liệu đã được hoàn tác, vui lòng thử lại."
             };
         }
     }
@@ -286,6 +294,7 @@ public class InventoryService : IInventoryService
             .Include(t => t.Supplier)
             .Include(t => t.Warehouse)
             .OrderByDescending(t => t.CreatedAt)
+            .ThenByDescending(t => t.TransactionId)
             .Select(t => new TransactionHistoryDto
             {
                 TransactionId = t.TransactionId,

@@ -1,4 +1,7 @@
 <Solution>
   <Project Path="webAPI/webAPI.csproj" />
-  <Project Path="webapp/webapp.esproj" />
+  <Project Path="webapp/webapp.esproj">
+    <Build />
+    <Deploy />
+  </Project>
 </Solution>

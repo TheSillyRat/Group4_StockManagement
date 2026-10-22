@@ -1,262 +1,185 @@
-import React, { useState, useEffect } from 'react';
-import { inventoryApi } from '../services/api';
-
+﻿import React, { useEffect, useState } from "react";
+import { inventoryApi } from "../services/api";
+import Icon from "../components/Icon";
+import { Metric, Search, Empty, Pagination } from "../components/DataUI";
 export default function TransactionHistory() {
-  const [history, setHistory] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [filterType, setFilterType] = useState('ALL'); // 'ALL' | 'Receive' | 'Dispatch'
-  const [searchTerm, setSearchTerm] = useState('');
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    fetchHistory();
-  }, []);
-
-  const fetchHistory = async () => {
+  const [history, setHistory] = useState([]),
+    [loading, setLoading] = useState(true),
+    [error, setError] = useState(""),
+    [search, setSearch] = useState(""),
+    [type, setType] = useState("ALL"),
+    [page, setPage] = useState(1);
+  const load = async () => {
     setLoading(true);
-    setError(null);
+    setError("");
     try {
-      const data = await inventoryApi.getTransactionHistory();
-      // Ensure data is array
-      const list = Array.isArray(data) ? data : (data?.value || []);
-      setHistory(list);
-    } catch (err) {
-      setError('Không thể tải lịch sử giao dịch: ' + (err.message || 'Lỗi kết nối'));
+      setHistory(await inventoryApi.getTransactionHistory());
+      setPage(1);
+    } catch (e) {
+      setError(e.message);
     } finally {
       setLoading(false);
     }
   };
-
-  // KPI Computations
-  const totalTransactions = history.length;
-  const receiveCount = history.filter(h => h.transactionType?.toLowerCase() === 'receive').length;
-  const dispatchCount = history.filter(h => h.transactionType?.toLowerCase() === 'dispatch').length;
-  const totalQuantityMoved = history.reduce((sum, h) => sum + (Number(h.quantity) || 0), 0);
-
-  // Filtered List
-  const filteredHistory = history.filter(item => {
-    const matchesType =
-      filterType === 'ALL' ||
-      item.transactionType?.toLowerCase() === filterType.toLowerCase();
-
-    const searchLower = searchTerm.toLowerCase().trim();
-    const matchesSearch =
-      !searchLower ||
-      item.transactionId?.toString().includes(searchLower) ||
-      item.productName?.toLowerCase().includes(searchLower) ||
-      item.warehouseName?.toLowerCase().includes(searchLower) ||
-      (item.supplierName && item.supplierName.toLowerCase().includes(searchLower));
-
-    return matchesType && matchesSearch;
-  });
-
-  const formatDate = (dateString) => {
-    if (!dateString) return '—';
-    try {
-      const d = new Date(dateString);
-      return d.toLocaleString('vi-VN', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
-      });
-    } catch {
-      return dateString;
-    }
-  };
-
+  useEffect(() => {
+    load();
+  }, []);
+  const filtered = history.filter(
+    (t) =>
+      (type === "ALL" || t.transactionType === type) &&
+      `${t.transactionId} ${t.productName} ${t.warehouseName} ${t.supplierName || ""}`
+        .toLowerCase()
+        .includes(search.toLowerCase().trim()),
+  );
+  const date = (value) =>
+    new Date(
+      /(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? value : `${value}Z`,
+    ).toLocaleString("vi-VN", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   return (
-    <div>
-      {/* KPI Metrics Summary Grid */}
+    <>
       <div className="stat-grid">
-        <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8' }}>
-            📊
-          </div>
-          <div className="stat-info">
-            <span className="stat-value">{totalTransactions}</span>
-            <span className="stat-label">Tổng Giao Dịch Đã Ghi</span>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399' }}>
-            📥
-          </div>
-          <div className="stat-info">
-            <span className="stat-value">{receiveCount}</span>
-            <span className="stat-label">Lượt Nhập Kho (Receive)</span>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171' }}>
-            📤
-          </div>
-          <div className="stat-info">
-            <span className="stat-value">{dispatchCount}</span>
-            <span className="stat-label">Lượt Xuất Kho (Dispatch)</span>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24' }}>
-            📦
-          </div>
-          <div className="stat-info">
-            <span className="stat-value">{totalQuantityMoved}</span>
-            <span className="stat-label">Tổng Đơn Vị Luân Chuyển</span>
-          </div>
-        </div>
+        <Metric
+          icon="history"
+          value={history.length}
+          label="Giao dịch đã xác nhận"
+        />
+        <Metric
+          icon="down"
+          value={history.filter((t) => t.transactionType === "Receive").length}
+          label="Giao dịch nhập kho"
+        />
+        <Metric
+          icon="up"
+          value={history.filter((t) => t.transactionType === "Dispatch").length}
+          label="Giao dịch xuất kho"
+        />
       </div>
-
-      {/* Main Table Card */}
-      <div className="card">
+      <section className="card">
         <div className="card-header">
           <div>
-            <h2 className="card-title">📜 Transaction History (Nhật Ký Giao Dịch)</h2>
-            <p className="card-subtitle" style={{ margin: '4px 0 0 0' }}>
-              Danh sách chi tiết tất cả giao dịch kho được bảo vệ tính toàn vẹn ACID trong SQL Server.
+            <h2 className="card-title">Nhật ký giao dịch</h2>
+            <p className="card-subtitle">
+              Các giao dịch đã lưu thành công, mới nhất ở trên.
             </p>
           </div>
-
-          <button
-            onClick={fetchHistory}
-            disabled={loading}
-            className="btn btn-outline"
-          >
-            {loading ? 'Đang tải...' : '🔄 Làm mới'}
+          <button className="btn btn-outline" onClick={load} disabled={loading}>
+            <Icon name="refresh" size={16} />
+            {loading ? "Đang tải..." : "Làm mới"}
           </button>
         </div>
-
-        {/* Error Alert */}
         {error && (
-          <div className="alert alert-error">
-            <span>❌</span>
-            <div style={{ flex: 1 }}>{error}</div>
-            <button
-              onClick={() => setError(null)}
-              style={{ background: 'transparent', color: 'inherit', fontWeight: 'bold' }}
-            >
-              ✕
-            </button>
+          <div className="alert alert-error" role="alert">
+            <Icon name="alert" />
+            {error}
           </div>
         )}
-
-        {/* Toolbar: Filters & Search */}
         <div className="toolbar">
           <div className="filter-group">
-            <button
-              type="button"
-              className={`filter-btn ${filterType === 'ALL' ? 'active' : ''}`}
-              onClick={() => setFilterType('ALL')}
-            >
-              Tất cả ({totalTransactions})
-            </button>
-            <button
-              type="button"
-              className={`filter-btn ${filterType === 'Receive' ? 'active' : ''}`}
-              onClick={() => setFilterType('Receive')}
-            >
-              📥 Nhập kho ({receiveCount})
-            </button>
-            <button
-              type="button"
-              className={`filter-btn ${filterType === 'Dispatch' ? 'active' : ''}`}
-              onClick={() => setFilterType('Dispatch')}
-            >
-              📤 Xuất kho ({dispatchCount})
-            </button>
+            {[
+              ["ALL", "Tất cả"],
+              ["Receive", "Nhập kho"],
+              ["Dispatch", "Xuất kho"],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                className={`filter-btn ${type === key ? "active" : ""}`}
+                aria-pressed={type === key}
+                onClick={() => {
+                  setType(key);
+                  setPage(1);
+                }}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <input
-              type="text"
-              className="search-input"
-              placeholder="🔍 Tìm theo sản phẩm, kho, nhà cung cấp..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-              Hiển thị: <strong>{filteredHistory.length}</strong> / {totalTransactions}
-            </span>
-          </div>
+          <Search
+            value={search}
+            onChange={(v) => {
+              setSearch(v);
+              setPage(1);
+            }}
+            placeholder="Tìm mã, sản phẩm hoặc kho..."
+          />
         </div>
-
-        {/* Data Table */}
-        {loading && history.length === 0 ? (
-          <p style={{ padding: 32, textAlign: 'center', color: 'var(--text-secondary)' }}>
-            Đang tải dữ liệu lịch sử giao dịch...
-          </p>
+        {loading ? (
+          <Empty loading title="Đang tải lịch sử..." />
+        ) : !filtered.length ? (
+          <Empty
+            title={
+              error ? "Chưa tải được dữ liệu" : "Chưa có giao dịch phù hợp"
+            }
+            description="Giao dịch sẽ xuất hiện sau khi bạn xác nhận và lưu thành công."
+          />
         ) : (
           <div className="table-responsive">
             <table className="table">
               <thead>
                 <tr>
-                  <th style={{ width: 80 }}>Mã GD</th>
-                  <th style={{ width: 130 }}>Loại Giao Dịch</th>
-                  <th>Sản Phẩm</th>
-                  <th style={{ width: 140 }}>Biến Động Tồn</th>
-                  <th>Kho Hàng</th>
-                  <th>Nhà Cung Cấp</th>
-                  <th style={{ width: 180 }}>Thời Gian Ghi Nhận</th>
-                  <th style={{ width: 110 }}>Trạng Thái</th>
+                  <th>GIAO DỊCH</th>
+                  <th>SẢN PHẨM</th>
+                  <th>LOẠI</th>
+                  <th>SỐ LƯỢNG</th>
+                  <th>KHO HÀNG</th>
+                  <th>NHÀ CUNG CẤP</th>
+                  <th>THỜI GIAN</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredHistory.length === 0 ? (
-                  <tr>
-                    <td colSpan="8" style={{ textAlign: 'center', padding: 32, color: 'var(--text-secondary)' }}>
-                      {searchTerm || filterType !== 'ALL'
-                        ? 'Không tìm thấy giao dịch nào khớp với điều kiện lọc.'
-                        : 'Chưa có bản ghi giao dịch nào được lưu trong hệ thống.'}
+                {filtered.slice((page - 1) * 10, page * 10).map((t) => (
+                  <tr key={t.transactionId}>
+                    <td>
+                      <strong>
+                        GD-{String(t.transactionId).padStart(4, "0")}
+                      </strong>
+                      <small>Đã ghi nhận</small>
                     </td>
+                    <td>
+                      <strong>{t.productName}</strong>
+                    </td>
+                    <td>
+                      <span
+                        className={`badge ${t.transactionType === "Receive" ? "badge-receive" : "badge-dispatch"}`}
+                      >
+                        <Icon
+                          name={t.transactionType === "Receive" ? "down" : "up"}
+                          size={12}
+                        />
+                        {t.transactionType === "Receive"
+                          ? "Nhập kho"
+                          : "Xuất kho"}
+                      </span>
+                    </td>
+                    <td
+                      className={
+                        t.transactionType === "Receive"
+                          ? "text-success"
+                          : "text-warning"
+                      }
+                    >
+                      <strong>
+                        {t.transactionType === "Receive" ? "+" : "−"}
+                        {t.quantity.toLocaleString("vi-VN")}
+                      </strong>{" "}
+                      {t.unit}
+                    </td>
+                    <td>{t.warehouseName}</td>
+                    <td className="muted">{t.supplierName || "—"}</td>
+                    <td className="muted">{date(t.createdAt)}</td>
                   </tr>
-                ) : (
-                  filteredHistory.map(item => {
-                    const isReceive = item.transactionType?.toLowerCase() === 'receive';
-                    return (
-                      <tr key={item.transactionId}>
-                        <td style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>
-                          #{item.transactionId}
-                        </td>
-                        <td>
-                          <span className={`badge ${isReceive ? 'badge-receive' : 'badge-dispatch'}`}>
-                            {isReceive ? '📥 Receive' : '📤 Dispatch'}
-                          </span>
-                        </td>
-                        <td>
-                          <strong style={{ color: 'var(--text-primary)' }}>{item.productName}</strong>
-                        </td>
-                        <td>
-                          <span style={{
-                            fontWeight: 700,
-                            color: isReceive ? 'var(--success)' : 'var(--danger)'
-                          }}>
-                            {isReceive ? `+${item.quantity}` : `-${item.quantity}`} {item.unit}
-                          </span>
-                        </td>
-                        <td>🏢 {item.warehouseName}</td>
-                        <td>{item.supplierName ? `🚚 ${item.supplierName}` : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
-                        <td style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                          {formatDate(item.createdAt)}
-                        </td>
-                        <td>
-                          <span className="badge badge-matched" style={{ fontSize: '0.72rem' }}>
-                            ✓ Đã Ghi DB
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
+                ))}
               </tbody>
             </table>
           </div>
         )}
-      </div>
-    </div>
+        <Pagination total={filtered.length} page={page} onChange={setPage} />
+      </section>
+    </>
   );
 }

@@ -42,7 +42,7 @@ public class WarehousesController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<WarehouseDto>> CreateWarehouse([FromBody] WarehouseDto dto)
     {
-        if (dto == null || string.IsNullOrWhiteSpace(dto.WarehouseName))
+        if (dto == null || string.IsNullOrWhiteSpace(dto.WarehouseName) || dto.WarehouseName.Length > 200)
         {
             return BadRequest(new { message = "Warehouse name cannot be empty." });
         }
@@ -78,7 +78,7 @@ public class WarehousesController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<IActionResult> UpdateWarehouse(int id, [FromBody] WarehouseDto dto)
     {
-        if (dto == null || string.IsNullOrWhiteSpace(dto.WarehouseName))
+        if (dto == null || string.IsNullOrWhiteSpace(dto.WarehouseName) || dto.WarehouseName.Length > 200)
         {
             return BadRequest(new { message = "Warehouse name cannot be empty." });
         }

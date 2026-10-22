@@ -1,326 +1,306 @@
-import React from 'react';
-
+﻿import React, { useState } from "react";
+import Icon from "./Icon";
 export default function TransactionConfirmation({
   extractedData,
-  onChangeData,
   onConfirm,
   onCancel,
   isSubmitting,
   products = [],
   warehouses = [],
-  suppliers = []
+  suppliers = [],
 }) {
-  if (!extractedData) return null;
-
-  // Find currently matched product in DB to show real-time stock
-  const matchedProduct = products.find(p =>
-    (extractedData.productId && p.productId === extractedData.productId) ||
-    (extractedData.productName && p.productName.toLowerCase() === extractedData.productName.trim().toLowerCase())
+  const [form, setForm] = useState(extractedData);
+  const product = products.find(
+    (p) =>
+      p.productId === Number(form.productId) ||
+      (!form.productId &&
+        p.productName.toLowerCase() ===
+          (form.productName || "").trim().toLowerCase()),
   );
-
-  const isDispatch = (extractedData.transactionType || 'Receive').toLowerCase() === 'dispatch';
-  const currentStock = matchedProduct ? matchedProduct.stockQuantity : null;
-  const requestedQty = Number(extractedData.quantity) || 0;
-  const isInsufficientStock = isDispatch && currentStock !== null && requestedQty > currentStock;
-
-  const handleFieldChange = (field, value) => {
-    const updated = { ...extractedData, [field]: value };
-
-    // When changing product name from dropdown, auto-fill unit & productId
-    if (field === 'productName') {
-      const prod = products.find(p => p.productName.toLowerCase() === value.toLowerCase());
-      if (prod) {
-        updated.productId = prod.productId;
-        updated.productExists = true;
-        updated.unit = prod.unit;
-      } else {
-        updated.productId = null;
-        updated.productExists = false;
-      }
-    }
-
-    // When changing warehouse name from dropdown
-    if (field === 'warehouseName') {
-      const wh = warehouses.find(w => w.warehouseName.toLowerCase() === value.toLowerCase());
-      if (wh) {
-        updated.warehouseId = wh.warehouseId;
-        updated.warehouseExists = true;
-      } else {
-        updated.warehouseId = null;
-        updated.warehouseExists = false;
-      }
-    }
-
-    // When changing supplier name from dropdown
-    if (field === 'supplierName') {
-      const sup = suppliers.find(s => s.supplierName.toLowerCase() === value.toLowerCase());
-      if (sup) {
-        updated.supplierId = sup.supplierId;
-        updated.supplierExists = true;
-      } else {
-        updated.supplierId = null;
-        updated.supplierExists = false;
-      }
-    }
-
-    onChangeData(updated);
+  const warehouse = warehouses.find(
+    (w) =>
+      w.warehouseId === Number(form.warehouseId) ||
+      (!form.warehouseId &&
+        w.warehouseName.toLowerCase() ===
+          (form.warehouseName || "").trim().toLowerCase()),
+  );
+  const supplier = suppliers.find(
+    (s) =>
+      s.supplierId === Number(form.supplierId) ||
+      (!form.supplierId &&
+        s.supplierName.toLowerCase() ===
+          (form.supplierName || "").trim().toLowerCase()),
+  );
+  const qty = Number(form.quantity);
+  const isDispatch = form.transactionType === "Dispatch";
+  const validType = ["Receive", "Dispatch"].includes(form.transactionType);
+  const insufficient = isDispatch && product && qty > product.stockQuantity;
+  const wrongUnit =
+    product &&
+    form.unit &&
+    form.unit.trim().toLowerCase() !== product.unit.toLowerCase();
+  const unknownSupplier = (form.supplierId || form.supplierName) && !supplier;
+  const valid =
+    validType &&
+    product &&
+    warehouse &&
+    Number.isInteger(qty) &&
+    qty > 0 &&
+    qty <= 2147483647 &&
+    !insufficient &&
+    !wrongUnit &&
+    !unknownSupplier;
+  const update = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+  const submit = (e) => {
+    e.preventDefault();
+    if (!valid || isSubmitting) return;
+    onConfirm({
+      transactionType: form.transactionType,
+      productId: product.productId,
+      warehouseId: warehouse.warehouseId,
+      supplierId: supplier?.supplierId || null,
+      quantity: qty,
+      unit: product.unit,
+    });
   };
-
   return (
-    <div className="card" style={{ borderColor: 'var(--accent)', marginTop: 24, boxShadow: '0 8px 24px rgba(0, 0, 0, 0.25)' }}>
-      {/* Card Header & Verification Status */}
+    <section className="card review-card">
       <div className="card-header">
-        <div>
-          <h3 className="card-title" style={{ color: 'var(--accent)' }}>
-            📝 Transaction Confirmation UI (Kiểm Tra & Xác Nhận)
-          </h3>
-          <p className="card-subtitle" style={{ margin: '4px 0 0 0' }}>
-            Rà soát và chỉnh sửa thông số giao dịch trước khi cập nhật vào cơ sở dữ liệu SQL Server.
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span className={`badge ${extractedData.isValid ? 'badge-matched' : 'badge-unmatched'}`}>
-            {extractedData.isValid ? '✓ Đã Đối Soát Với DB' : '⚠️ Cần Kiểm Tra Lại'}
+        <div className="section-heading">
+          <span className="section-icon">
+            <Icon name="check" />
           </span>
-        </div>
-      </div>
-
-      {/* Ambiguity Alert Notice if applicable */}
-      {extractedData.isAmbiguous && (
-        <div className="alert alert-warning">
-          <span style={{ fontSize: '1.2rem' }}>⚠️</span>
           <div>
-            <strong>Cảnh báo từ AI: Yêu cầu chưa đầy đủ hoặc còn mơ hồ</strong>
-            <p style={{ marginTop: 4, fontSize: '0.88rem' }}>
-              {extractedData.clarificationMessage || 'Yêu cầu thiếu các thông tin bắt buộc. Vui lòng bổ sung Sản phẩm, Kho và Số lượng vào các trường bên dưới.'}
+            <h2 className="card-title">Kiểm tra & xác nhận</h2>
+            <p className="card-subtitle">
+              Kiểm tra các trường bên dưới. Tồn kho chưa thay đổi.
             </p>
           </div>
         </div>
-      )}
-
-      {/* Database Reference Status Strip */}
-      <div style={{
-        background: 'rgba(15, 23, 42, 0.6)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-sm)',
-        padding: '12px 16px',
-        marginBottom: 20,
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: 16,
-        alignItems: 'center',
-        justifyContent: 'space-between'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.88rem' }}>
-          <span style={{ color: 'var(--text-secondary)' }}>Sản phẩm:</span>
-          {extractedData.productExists ? (
-            <span className="badge badge-matched">✓ {extractedData.productName} (ID: #{extractedData.productId})</span>
-          ) : (
-            <span className="badge badge-unmatched">❌ Chưa có trong DB</span>
-          )}
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.88rem' }}>
-          <span style={{ color: 'var(--text-secondary)' }}>Kho hàng:</span>
-          {extractedData.warehouseExists ? (
-            <span className="badge badge-matched">✓ {extractedData.warehouseName} (ID: #{extractedData.warehouseId})</span>
-          ) : (
-            <span className="badge badge-unmatched">❌ Chưa có trong DB</span>
-          )}
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.88rem' }}>
-          <span style={{ color: 'var(--text-secondary)' }}>Nhà cung cấp:</span>
-          {isDispatch ? (
-            <span className="badge badge-neutral">ℹ️ Không bắt buộc cho Xuất kho</span>
-          ) : extractedData.supplierExists ? (
-            <span className="badge badge-matched">✓ {extractedData.supplierName} (ID: #{extractedData.supplierId})</span>
-          ) : (
-            <span className="badge badge-neutral">Chưa xác định</span>
-          )}
-        </div>
-      </div>
-
-      {/* Editable Fields Form */}
-      <div className="form-grid">
-        {/* Transaction Type */}
-        <div className="form-field">
-          <label className="form-label">
-            Loại Giao Dịch <span style={{ color: 'var(--danger)' }}>*</span>
-          </label>
-          <select
-            value={extractedData.transactionType || 'Receive'}
-            onChange={(e) => handleFieldChange('transactionType', e.target.value)}
-            style={{ fontWeight: 600 }}
-          >
-            <option value="Receive">📥 Nhập kho (Receive / Inbound)</option>
-            <option value="Dispatch">📤 Xuất kho (Dispatch / Outbound)</option>
-          </select>
-        </div>
-
-        {/* Product selection */}
-        <div className="form-field">
-          <label className="form-label">
-            <span>Sản Phẩm <span style={{ color: 'var(--danger)' }}>*</span></span>
-            {matchedProduct && (
-              <span style={{ color: 'var(--accent)', fontWeight: 500, fontSize: '0.75rem' }}>
-                Tồn hiện tại: {matchedProduct.stockQuantity} {matchedProduct.unit}
-              </span>
-            )}
-          </label>
-          <input
-            list="product-list"
-            type="text"
-            value={extractedData.productName || ''}
-            placeholder="Chọn hoặc nhập tên sản phẩm..."
-            onChange={(e) => handleFieldChange('productName', e.target.value)}
-            style={{
-              borderColor: extractedData.productExists ? 'var(--success)' : 'var(--border)'
-            }}
-          />
-          <datalist id="product-list">
-            {products.map(p => (
-              <option key={p.productId} value={p.productName}>
-                {p.productName} ({p.stockQuantity} {p.unit})
-              </option>
-            ))}
-          </datalist>
-        </div>
-
-        {/* Quantity */}
-        <div className="form-field">
-          <label className="form-label">
-            Số Lượng <span style={{ color: 'var(--danger)' }}>*</span>
-          </label>
-          <input
-            type="number"
-            min="1"
-            value={extractedData.quantity ?? ''}
-            onChange={(e) => handleFieldChange('quantity', e.target.value)}
-            placeholder="Nhập số lượng > 0"
-          />
-        </div>
-
-        {/* Unit */}
-        <div className="form-field">
-          <label className="form-label">Đơn Vị Tính</label>
-          <input
-            type="text"
-            value={extractedData.unit || ''}
-            placeholder="Ví dụ: box, kg, cái..."
-            onChange={(e) => handleFieldChange('unit', e.target.value)}
-          />
-        </div>
-
-        {/* Warehouse */}
-        <div className="form-field">
-          <label className="form-label">
-            Kho Hàng Đích / Nguồn <span style={{ color: 'var(--danger)' }}>*</span>
-          </label>
-          <input
-            list="warehouse-list"
-            type="text"
-            value={extractedData.warehouseName || ''}
-            placeholder="Chọn hoặc nhập tên kho..."
-            onChange={(e) => handleFieldChange('warehouseName', e.target.value)}
-            style={{
-              borderColor: extractedData.warehouseExists ? 'var(--success)' : 'var(--border)'
-            }}
-          />
-          <datalist id="warehouse-list">
-            {warehouses.map(w => (
-              <option key={w.warehouseId} value={w.warehouseName} />
-            ))}
-          </datalist>
-        </div>
-
-        {/* Supplier */}
-        <div className="form-field">
-          <label className="form-label">
-            Nhà Cung Cấp {isDispatch ? '(Không bắt buộc)' : ''}
-          </label>
-          <input
-            list="supplier-list"
-            type="text"
-            value={extractedData.supplierName || ''}
-            placeholder={isDispatch ? 'Tùy chọn khi xuất kho...' : 'Chọn hoặc nhập nhà cung cấp...'}
-            onChange={(e) => handleFieldChange('supplierName', e.target.value)}
-          />
-          <datalist id="supplier-list">
-            {suppliers.map(s => (
-              <option key={s.supplierId} value={s.supplierName} />
-            ))}
-          </datalist>
-        </div>
-      </div>
-
-      {/* Stock Preview & Balance Projection */}
-      {matchedProduct && (
-        <div style={{
-          background: isInsufficientStock ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.08)',
-          border: `1px solid ${isInsufficientStock ? 'var(--danger)' : 'rgba(16, 185, 129, 0.25)'}`,
-          borderRadius: 'var(--radius-sm)',
-          padding: '12px 16px',
-          marginBottom: 20
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-            <div>
-              <span style={{ fontSize: '0.88rem', color: 'var(--text-secondary)' }}>
-                Dự kiến biến động tồn kho ({matchedProduct.productName}):
-              </span>
-              <div style={{ marginTop: 4, fontWeight: 600 }}>
-                Tồn hiện tại: <strong>{currentStock} {matchedProduct.unit}</strong>
-                {' ➔ '}
-                {isDispatch ? (
-                  <span style={{ color: isInsufficientStock ? 'var(--danger)' : 'var(--warning)' }}>
-                    Xuất -{requestedQty} {matchedProduct.unit}
-                    {' = '}
-                    {currentStock - requestedQty} {matchedProduct.unit}
-                  </span>
-                ) : (
-                  <span style={{ color: 'var(--success)' }}>
-                    Nhập +{requestedQty} {matchedProduct.unit}
-                    {' = '}
-                    {currentStock + requestedQty} {matchedProduct.unit}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {isInsufficientStock && (
-              <div style={{ color: '#f87171', fontWeight: 700, fontSize: '0.9rem' }}>
-                ❌ Cảnh báo: Tồn kho không đủ! Yêu cầu sẽ bị hệ thống từ chối.
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Confirmation Actions */}
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        <button
-          onClick={onConfirm}
-          disabled={isSubmitting || requestedQty <= 0 || !extractedData.productName || !extractedData.warehouseName}
-          className="btn btn-success"
-          style={{ padding: '10px 24px', fontSize: '0.95rem' }}
-        >
-          {isSubmitting ? 'Đang xác nhận...' : '✓ Confirm Transaction (Xác Nhận & Cập Nhật Tồn Kho)'}
-        </button>
-
-        <button
-          onClick={onCancel}
-          disabled={isSubmitting}
-          className="btn btn-outline"
-          style={{ padding: '10px 20px' }}
-        >
-          ✕ Cancel (Hủy Bỏ)
-        </button>
-
-        <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginLeft: 'auto' }}>
-          * Giao dịch được bảo toàn tính toàn vẹn ACID với SQL Server
+        <span className={`badge ${valid ? "badge-matched" : "badge-neutral"}`}>
+          {valid ? "Sẵn sàng xác nhận" : "Cần kiểm tra thông tin"}
         </span>
       </div>
-    </div>
+      <form onSubmit={submit}>
+        <fieldset disabled={isSubmitting}>
+          <div className="form-grid">
+            <div className="form-field">
+              <label htmlFor="review-type">Loại giao dịch *</label>
+              <select
+                id="review-type"
+                value={form.transactionType || ""}
+                onChange={(e) => update("transactionType", e.target.value)}
+                required
+              >
+                <option value="" disabled>
+                  Chọn loại giao dịch
+                </option>
+                <option value="Receive">Nhập kho</option>
+                <option value="Dispatch">Xuất kho</option>
+              </select>
+            </div>
+            <div className="form-field">
+              <label htmlFor="review-product">Sản phẩm *</label>
+              <select
+                id="review-product"
+                value={product?.productId || ""}
+                required
+                onChange={(e) => {
+                  const p = products.find(
+                    (x) => x.productId === Number(e.target.value),
+                  );
+                  setForm((f) => ({
+                    ...f,
+                    productId: p?.productId,
+                    productName: p?.productName || "",
+                    unit: p?.unit || "",
+                  }));
+                }}
+              >
+                <option value="" disabled>
+                  {form.productName
+                    ? `${form.productName} — cần chọn lại`
+                    : "Chọn sản phẩm"}
+                </option>
+                {products.map((p) => (
+                  <option key={p.productId} value={p.productId}>
+                    {p.productName}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-field">
+              <label htmlFor="review-warehouse">Kho hàng *</label>
+              <select
+                id="review-warehouse"
+                value={warehouse?.warehouseId || ""}
+                required
+                onChange={(e) => {
+                  const w = warehouses.find(
+                    (x) => x.warehouseId === Number(e.target.value),
+                  );
+                  setForm((f) => ({
+                    ...f,
+                    warehouseId: w?.warehouseId,
+                    warehouseName: w?.warehouseName || "",
+                  }));
+                }}
+              >
+                <option value="" disabled>
+                  {form.warehouseName
+                    ? `${form.warehouseName} — cần chọn lại`
+                    : "Chọn kho hàng"}
+                </option>
+                {warehouses.map((w) => (
+                  <option key={w.warehouseId} value={w.warehouseId}>
+                    {w.warehouseName}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-field">
+              <label htmlFor="review-quantity">Số lượng *</label>
+              <input
+                id="review-quantity"
+                type="number"
+                min="1"
+                max="2147483647"
+                step="1"
+                required
+                value={form.quantity ?? ""}
+                onChange={(e) => update("quantity", e.target.value)}
+                aria-invalid={insufficient || undefined}
+              />
+            </div>
+            <div className="form-field">
+              <label htmlFor="review-unit">Đơn vị tính</label>
+              <input
+                id="review-unit"
+                readOnly
+                value={product?.unit || form.unit || "—"}
+              />
+              <small>Theo đơn vị chuẩn của sản phẩm.</small>
+            </div>
+            <div className="form-field">
+              <label htmlFor="review-supplier">
+                Nhà cung cấp <span>Tùy chọn</span>
+              </label>
+              <select
+                id="review-supplier"
+                value={supplier?.supplierId || ""}
+                onChange={(e) => {
+                  const s = suppliers.find(
+                    (x) => x.supplierId === Number(e.target.value),
+                  );
+                  setForm((f) => ({
+                    ...f,
+                    supplierId: s?.supplierId || null,
+                    supplierName: s?.supplierName || null,
+                  }));
+                }}
+              >
+                <option value="">
+                  {unknownSupplier
+                    ? `${form.supplierName || "Không tìm thấy"} — chọn lại hoặc bỏ trống`
+                    : "Không có nhà cung cấp"}
+                </option>
+                {suppliers.map((s) => (
+                  <option key={s.supplierId} value={s.supplierId}>
+                    {s.supplierName}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </fieldset>
+        {wrongUnit && (
+          <div className="alert alert-warning" role="alert">
+            <Icon name="alert" />
+            <div>
+              Đơn vị AI trích xuất là “{form.unit}”, khác đơn vị chuẩn “
+              {product.unit}”.{" "}
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => update("unit", product.unit)}
+                disabled={isSubmitting}
+              >
+                Dùng đơn vị {product.unit}
+              </button>
+            </div>
+          </div>
+        )}
+        {unknownSupplier && (
+          <p className="field-error" role="alert">
+            Nhà cung cấp chưa có trong danh mục. Vui lòng chọn lại hoặc bỏ
+            trống.
+          </p>
+        )}
+        {product && validType && (
+          <div className={`stock-preview ${insufficient ? "invalid" : ""}`}>
+            <div>
+              <small>TỒN HIỆN TẠI · TOÀN HỆ THỐNG</small>
+              <strong>
+                {product.stockQuantity.toLocaleString("vi-VN")}{" "}
+                <span>{product.unit}</span>
+              </strong>
+            </div>
+            <Icon name="arrow" />
+            <div>
+              <small>{isDispatch ? "XUẤT KHO" : "NHẬP KHO"}</small>
+              <strong className={isDispatch ? "text-warning" : "text-success"}>
+                {isDispatch ? "−" : "+"}
+                {Number.isFinite(qty) ? qty.toLocaleString("vi-VN") : "—"}{" "}
+                <span>{product.unit}</span>
+              </strong>
+            </div>
+            <Icon name="arrow" />
+            <div>
+              <small>DỰ KIẾN SAU GIAO DỊCH</small>
+              <strong>
+                {Number.isFinite(qty)
+                  ? (
+                      product.stockQuantity + (isDispatch ? -qty : qty)
+                    ).toLocaleString("vi-VN")
+                  : "—"}{" "}
+                <span>{product.unit}</span>
+              </strong>
+            </div>
+          </div>
+        )}
+        {insufficient && (
+          <p className="field-error" role="alert">
+            Tồn kho không đủ. Vui lòng giảm số lượng xuất hoặc chọn sản phẩm
+            khác.
+          </p>
+        )}
+        <div className="review-actions">
+          <p>
+            <Icon name="check" size={16} /> Tồn kho và lịch sử được lưu cùng
+            lúc.
+          </p>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={isSubmitting}
+            className="btn btn-outline"
+          >
+            Hủy giao dịch
+          </button>
+          <button
+            type="submit"
+            disabled={!valid || isSubmitting}
+            className="btn btn-primary"
+          >
+            {isSubmitting ? (
+              <span className="spinner" />
+            ) : (
+              <Icon name="check" size={17} />
+            )}{" "}
+            {isSubmitting ? "Đang lưu..." : "Xác nhận & lưu giao dịch"}
+          </button>
+        </div>
+      </form>
+    </section>
   );
 }
