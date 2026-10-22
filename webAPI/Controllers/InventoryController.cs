@@ -18,15 +18,16 @@ public class InventoryController : ControllerBase
     }
 
     /// <summary>
-    /// R3 & R4: Submit natural-language inventory requests for AI processing
+    /// Requirement R3 & R4 / SH-05 (Sang Huỳnh):
+    /// Accepts natural-language inventory prompt, extracts structured transaction parameters,
+    /// validates entities against SQL Server, and handles ambiguity.
     /// </summary>
     [HttpPost("ai-extract")]
     public async Task<ActionResult<ExtractedTransactionDto>> ExtractData([FromBody] AiInventoryRequest request)
     {
-        // TODO [Member 3 / AI Engineer]: Call Gemini service and validate against DB
-        if (string.IsNullOrWhiteSpace(request.Prompt))
+        if (request == null || string.IsNullOrWhiteSpace(request.Prompt))
         {
-            return BadRequest(new { message = "Prompt cannot be empty" });
+            return BadRequest(new { message = "Prompt cannot be empty." });
         }
 
         var extracted = await _geminiService.ExtractInventoryDataAsync(request.Prompt);
@@ -35,28 +36,44 @@ public class InventoryController : ControllerBase
     }
 
     /// <summary>
-    /// R3 & R5: Confirm and save inventory transaction to SQL Server
+    /// Requirement R3 & R5 / TA-04 (Tài):
+    /// Commits confirmed inventory transaction to SQL Server with ACID transaction guarantee.
+    /// Updates stock levels (increment on Receive, decrement on Dispatch).
     /// </summary>
     [HttpPost("confirm")]
     public async Task<IActionResult> ConfirmTransaction([FromBody] ConfirmTransactionRequest request)
     {
-        // TODO [Member 2 / Backend Dev]: Execute database transaction & update stock
-        var success = await _inventoryService.ConfirmAndSaveTransactionAsync(request);
-        if (!success)
+        if (request == null)
         {
-            return BadRequest(new { message = "Failed to confirm transaction. Invalid references or insufficient stock." });
+            return BadRequest(new { message = "Transaction request payload cannot be null." });
         }
 
-        return Ok(new { message = "Transaction confirmed successfully." });
+        var result = await _inventoryService.ConfirmAndSaveTransactionAsync(request);
+        if (!result.Success)
+        {
+            return BadRequest(new
+            {
+                message = result.Message,
+                success = false
+            });
+        }
+
+        return Ok(new
+        {
+            message = result.Message,
+            transactionId = result.TransactionId,
+            newStockQuantity = result.NewStockQuantity,
+            success = true
+        });
     }
 
     /// <summary>
-    /// R3: Retrieve transaction history
+    /// Requirement R3 & TA-05 (Tài):
+    /// Retrieves all recorded inventory transactions sorted in descending order of creation.
     /// </summary>
     [HttpGet("history")]
     public async Task<ActionResult<IEnumerable<TransactionHistoryDto>>> GetHistory()
     {
-        // TODO [Member 2 / Backend Dev]: Return history of transactions
         var history = await _inventoryService.GetTransactionHistoryAsync();
         return Ok(history);
     }
