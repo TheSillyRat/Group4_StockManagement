@@ -17,6 +17,10 @@ public class ConfirmTransactionRequest
     public string? Unit { get; set; }
     public bool CreateNewProduct { get; set; }
     public bool ConfirmAdditionalDispatches { get; set; }
+    public string? DestinationType { get; set; }
+    public int? DestinationWarehouseId { get; set; }
+    [System.ComponentModel.DataAnnotations.MaxLength(200)]
+    public string? ExternalDestination { get; set; }
     [System.ComponentModel.DataAnnotations.MaxLength(20)]
     public List<DispatchAllocation>? DispatchAllocations { get; set; }
 }

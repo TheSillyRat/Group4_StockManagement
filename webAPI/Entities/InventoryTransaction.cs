@@ -25,6 +25,12 @@ public class InventoryTransaction
 
     [ForeignKey(nameof(WarehouseId))]
     public Warehouse? Warehouse { get; set; }
+    [MaxLength(20)]
+    public string? DestinationType { get; set; }
+    public int? DestinationWarehouseId { get; set; }
+    public Warehouse? DestinationWarehouse { get; set; }
+    [MaxLength(200)]
+    public string? ExternalDestination { get; set; }
 
     [Required]
     [MaxLength(50)]

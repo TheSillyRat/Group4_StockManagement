@@ -26,6 +26,10 @@ public class ExtractedTransactionDto
     public bool CanCreateProduct { get; set; }
     public string? ValidationMessage { get; set; }
     public DispatchOptionsDto? DispatchOptions { get; set; }
+    public string? DestinationType { get; set; }
+    public string? DestinationWarehouseName { get; set; }
+    public int? DestinationWarehouseId { get; set; }
+    public string? ExternalDestination { get; set; }
 
     // Ambiguity handling (R4.7)
     public bool IsAmbiguous { get; set; }

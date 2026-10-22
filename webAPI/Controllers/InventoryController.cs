@@ -71,10 +71,10 @@ public class InventoryController : ControllerBase
     }
 
     [HttpGet("dispatch-options")]
-    public async Task<IActionResult> DispatchOptions(int productId, int warehouseId, int quantity)
+    public async Task<IActionResult> DispatchOptions(int productId, int warehouseId, int quantity, int? destinationWarehouseId = null)
     {
         if (productId <= 0 || warehouseId <= 0 || quantity <= 0) return BadRequest(new { message = "Vui lòng chọn sản phẩm, kho và số lượng dương." });
-        return Ok(await _inventoryService.GetDispatchOptionsAsync(productId, warehouseId, quantity));
+        return Ok(await _inventoryService.GetDispatchOptionsAsync(productId, warehouseId, quantity, destinationWarehouseId));
     }
 
     [HttpPost("transfer")]

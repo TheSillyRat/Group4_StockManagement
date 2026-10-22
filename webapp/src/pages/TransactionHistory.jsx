@@ -27,7 +27,7 @@ export default function TransactionHistory() {
   const filtered = history.filter(
     (t) =>
       (type === "ALL" || t.transactionType === type) &&
-      `${t.transactionId} ${t.productName} ${t.warehouseName} ${t.supplierName || ""}`
+      `${t.transactionId} ${t.productName} ${t.warehouseName} ${t.supplierName || ""} ${t.destinationWarehouseName || ""} ${t.externalDestination || ""}`
         .toLowerCase()
         .includes(search.toLowerCase().trim()),
   );
@@ -129,6 +129,7 @@ export default function TransactionHistory() {
                   <th>LOẠI</th>
                   <th>SỐ LƯỢNG</th>
                   <th>KHO HÀNG</th>
+                  <th>NƠI ĐẾN</th>
                   {(type === "ALL" || type === "Receive") && (
                     <th>NHÀ CUNG CẤP</th>
                   )}
@@ -179,6 +180,11 @@ export default function TransactionHistory() {
                       {t.unit}
                     </td>
                     <td>{t.warehouseName}</td>
+                    <td>
+                      {t.destinationWarehouseName ||
+                        t.externalDestination ||
+                        (t.destinationType === "External" ? "Bên ngoài" : "—")}
+                    </td>
                     {(type === "ALL" || type === "Receive") && (
                       <td className="muted">
                         {t.transactionType === "Receive"

@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using webAPI.Data;
 using webAPI.DTOs;
@@ -18,7 +18,7 @@ var options = new DbContextOptionsBuilder<ApplicationDbContext>()
     .UseSqlServer($"Server=(localdb)\\mssqllocaldb;Database={database};Trusted_Connection=True;TrustServerCertificate=True").Options;
 ApplicationDbContext Context() => new(options);
 InventoryService Service(ApplicationDbContext db) => new(db, NullLogger<InventoryService>.Instance);
-ConfirmTransactionRequest Request(string type, int quantity) => new() { TransactionType=type, ProductId=1, WarehouseId=1, SupplierId=1, Quantity=quantity, Unit="box" };
+ConfirmTransactionRequest Request(string type, int quantity) => new() { TransactionType=type, DestinationType=type=="Dispatch"?"External":null, ProductId=1, WarehouseId=1, SupplierId=1, Quantity=quantity, Unit="box" };
 void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); }
 async Task<ConfirmResult> Confirm(ConfirmTransactionRequest request) { await using var db=Context(); return await Service(db).ConfirmAndSaveTransactionAsync(request); }
 async Task<int> Stock() { await using var db=Context(); return await db.Products.Where(p=>p.ProductId==1).Select(p=>p.StockQuantity).SingleAsync(); }
@@ -159,6 +159,30 @@ try {
     Check(supplierDto!=null && await supplierController.UpdateSupplier(supplierDto.SupplierId,new(){SupplierName="Updated isolated supplier"}) is OkObjectResult && await supplierController.DeleteSupplier(supplierDto.SupplierId) is OkObjectResult,"Supplier create, update and delete APIs work for unused catalog entries");
     Check(await new WarehousesController(checkDb).DeleteWarehouse(-1) is BadRequestObjectResult,"System unallocated warehouse cannot be deleted");
   }
+  var missingDestination=Request("Dispatch",1);missingDestination.WarehouseId=2;missingDestination.DestinationType=null;
+  Check(!(await Confirm(missingDestination)).Success,"Dispatch requires an explicit destination");
+  var transferProduct=await Confirm(NewRequest("Destination transfer test"));
+  var transferId=transferProduct.ProductId!.Value;
+  var topUp=Request("Receive",10);topUp.ProductId=transferId;topUp.WarehouseId=2;
+  Check((await Confirm(topUp)).Success,"Destination test stocks two source warehouses");
+  var move=Request("Dispatch",25);move.ProductId=transferId;move.DestinationType="Warehouse";move.DestinationWarehouseId=3;
+  await using(var checkDb=Context()) {
+    var plan=await Service(checkDb).GetDispatchOptionsAsync(transferId,1,25,3);
+    Check(plan.CanFulfill && plan.Alternatives.All(s=>s.WarehouseId!=3),"Transfer plan excludes destination from source candidates");
+  }
+  move.ConfirmAdditionalDispatches=true;move.DispatchAllocations=new(){new(){WarehouseId=1,Quantity=20},new(){WarehouseId=2,Quantity=5}};
+  var movedDestination=await Confirm(move);
+  await using(var checkDb=Context()) {
+    Check(movedDestination.Success && movedDestination.TransactionIds.Count==3 && await checkDb.Products.Where(p=>p.ProductId==transferId).Select(p=>p.StockQuantity).SingleAsync()==30 && await checkDb.WarehouseStocks.Where(s=>s.ProductId==transferId && s.WarehouseId==3).Select(s=>s.Quantity).SingleAsync()==25,"Split transfer credits destination and preserves total atomically");
+    Check((await Service(checkDb).GetTransactionHistoryAsync()).Where(t=>movedDestination.TransactionIds.Contains(t.TransactionId)).All(t=>t.DestinationWarehouseName!=null && t.SupplierName==null),"Transfer history identifies destination and excludes supplier");
+  }
+  var sameDestination=Request("Dispatch",1);sameDestination.ProductId=transferId;sameDestination.DestinationType="Warehouse";sameDestination.DestinationWarehouseId=1;
+  Check(!(await Confirm(sameDestination)).Success,"Source and destination must differ");
+  sameDestination.DestinationWarehouseId=-1;
+  Check(!(await Confirm(sameDestination)).Success,"Unallocated inventory cannot be a dispatch destination");
+  var external=Request("Dispatch",1);external.ProductId=transferId;external.WarehouseId=3;external.ExternalDestination="Customer test";
+  var externalResult=await Confirm(external);
+  await using(var checkDb=Context()) Check(externalResult.Success && await checkDb.InventoryTransactions.AnyAsync(t=>t.TransactionId==externalResult.TransactionId && t.ExternalDestination=="Customer test" && t.DestinationWarehouseId==null),"External dispatch stores recipient and reduces stock without warehouse destination");
   Console.WriteLine("ALL CHECKS PASSED");
 } finally {
   // Only the test-owned database named above is removed.

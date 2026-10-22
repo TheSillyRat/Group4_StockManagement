@@ -30,6 +30,7 @@ public class ApplicationDbContext : DbContext
         // Configure InventoryTransaction relationships
         modelBuilder.Entity<InventoryTransaction>(entity =>
         {
+            entity.HasOne(t => t.DestinationWarehouse).WithMany().HasForeignKey(t => t.DestinationWarehouseId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(t => t.Product)
                   .WithMany(p => p.InventoryTransactions)
                   .HasForeignKey(t => t.ProductId)

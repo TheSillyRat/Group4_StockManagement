@@ -1,4 +1,4 @@
-﻿const fs = require("node:fs");
+const fs = require("node:fs");
 const path = require("node:path");
 let playwright;
 try {
@@ -34,8 +34,12 @@ if (!playwright) throw new Error("Install Playwright to run UI checks.");
     await page.goto("http://localhost:5173", { waitUntil: "networkidle" });
     await page.getByText("Đã kết nối", { exact: true }).waitFor();
     check(
-      (await page.locator(".collection-row").count()) >= 3,
-      "Dashboard loads real product data",
+      (await page.locator(".dashboard-kpi").count()) === 4,
+      "Overview displays four real-data KPIs",
+    );
+    check(
+      (await page.locator(".activity-chart").count()) === 1,
+      "Overview displays transaction activity chart",
     );
     const columns = await page.evaluate(() => ({
       sidebar: document.querySelector(".sidebar").getBoundingClientRect().width,
@@ -50,40 +54,16 @@ if (!playwright) throw new Error("Install Playwright to run UI checks.");
         columns.background === "rgb(74, 71, 163)",
       "Desktop has requested 240px purple sidebar and 280px right panel",
     );
-    await page
-      .locator(".collection-row")
-      .nth(1)
-      .locator(".row-product")
-      .click();
+    await page.locator(".profile-toggle").click();
     check(
-      (await page.locator(".selected-detail h3").innerText()) === "Product B",
-      "Selecting a product updates the stock detail panel",
+      (await page.locator(".profile-panel").count()) === 0,
+      "Right panel closes",
     );
+    await page.locator(".profile-toggle").click();
     check(
-      (await page.locator("footer.bottom-bar").count()) === 0,
-      "Bottom control bar has been removed",
+      await page.locator(".profile-panel").isVisible(),
+      "Right panel reopens",
     );
-    await page
-      .locator(".collection-row")
-      .first()
-      .getByRole("button", { name: "Đánh dấu Product A", exact: true })
-      .click();
-    await page.getByRole("button", { name: /^Đã đánh dấu/ }).click();
-    check(
-      (await page.locator(".collection-row").count()) === 1,
-      "Favorites filter works",
-    );
-    await page.getByRole("button", { name: /^Tất cả sản phẩm/ }).click();
-    await page
-      .getByRole("textbox", { name: "Tìm kiếm sản phẩm", exact: true })
-      .fill("Product B");
-    check(
-      (await page.locator(".collection-row").count()) === 1,
-      "Global search filters products",
-    );
-    await page
-      .getByRole("textbox", { name: "Tìm kiếm sản phẩm", exact: true })
-      .fill("");
     fs.mkdirSync("tests/artifacts", { recursive: true });
     await page.screenshot({
       path: "tests/artifacts/dashboard-desktop.png",
@@ -270,6 +250,8 @@ if (!playwright) throw new Error("Install Playwright to run UI checks.");
       return route.fulfill({
         json: {
           productId: 1,
+          destinationWarehouseId:
+            Number(url.searchParams.get("destinationWarehouseId")) || null,
           warehouseId: 1,
           requestedQuantity: quantity,
           availableQuantity: 8,
@@ -298,6 +280,22 @@ if (!playwright) throw new Error("Install Playwright to run UI checks.");
     await page
       .getByRole("button", { name: "Phân tích yêu cầu", exact: true })
       .click();
+    check(
+      (await page.locator("#review-destination").inputValue()) === "",
+      "Dispatch without destination asks the user to choose",
+    );
+    check(
+      (await page.locator('#review-destination option[value="1"]').count()) ===
+        0,
+      "Source warehouse is excluded from destination choices",
+    );
+    await page.locator("#review-destination").selectOption("3");
+    check(
+      (await page.locator("#review-external-destination").count()) === 0,
+      "Internal destination hides external recipient",
+    );
+    await page.locator("#review-destination").selectOption("External");
+    await page.locator("#review-external-destination").fill("Test customer");
     await page
       .getByRole("button", {
         name: "Có, tạo kế hoạch xuất từ các kho còn hàng",
@@ -338,7 +336,9 @@ if (!playwright) throw new Error("Install Playwright to run UI checks.");
       confirmCalls === 2 &&
         confirmedPayload.confirmAdditionalDispatches === true &&
         confirmedPayload.dispatchAllocations.length === 2 &&
-        confirmedPayload.supplierId === null,
+        confirmedPayload.supplierId === null &&
+        confirmedPayload.destinationType === "External" &&
+        confirmedPayload.externalDestination === "Test customer",
       "Final confirmation sends explicit consent, both warehouse legs and no supplier",
     );
     await page.getByRole("button", { name: "Sản phẩm", exact: true }).click();
@@ -528,7 +528,7 @@ if (!playwright) throw new Error("Install Playwright to run UI checks.");
           .getByLabel("Tên kho hàng *", { exact: true })
           .inputValue()) === "Kho Đồng Nai thử AI" &&
         warehouseWrites === 0,
-      "Warehouse AI chat fills the name without saving",
+      `Warehouse AI chat fills the name without saving: ${catalogResponse.status()} ${await catalogResponse.text()}`,
     );
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({
@@ -604,6 +604,16 @@ if (!playwright) throw new Error("Install Playwright to run UI checks.");
         () => document.documentElement.scrollWidth <= window.innerWidth,
       ),
       "Mobile has no horizontal page overflow",
+    );
+    await page.locator(".profile-toggle").click();
+    check(
+      await page.locator(".profile-panel").isVisible(),
+      "Mobile opens profile drawer",
+    );
+    await page.keyboard.press("Escape");
+    check(
+      (await page.locator(".profile-panel").count()) === 0,
+      "Escape closes mobile drawer",
     );
     check(errors.length === 0, "No browser runtime errors");
     console.log("ALL UI CHECKS PASSED");

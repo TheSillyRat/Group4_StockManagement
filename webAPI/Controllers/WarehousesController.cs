@@ -134,7 +134,7 @@ public class WarehousesController : ControllerBase
 
         if (warehouse.IsUnallocated || await _context.WarehouseStocks.AnyAsync(s => s.WarehouseId == id && s.Quantity > 0))
             return BadRequest(new { message = "Không thể xóa kho hệ thống hoặc kho vẫn còn hàng." });
-        var hasTransactions = await _context.InventoryTransactions.AnyAsync(t => t.WarehouseId == id);
+        var hasTransactions = await _context.InventoryTransactions.AnyAsync(t => t.WarehouseId == id || t.DestinationWarehouseId == id);
         if (hasTransactions)
         {
             return BadRequest(new { message = $"Cannot delete warehouse '{warehouse.WarehouseName}' because it has linked transactions." });

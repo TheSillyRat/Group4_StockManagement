@@ -35,10 +35,33 @@ export default function App() {
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState(null);
-  const [favorites, setFavorites] = useState(() =>
-      stored("stockflow-favorites", []),
-    ),
-    [compact, setCompact] = useState(() => stored("stockflow-compact", false));
+  const [profileOpen, setProfileOpen] = useState(() =>
+    stored("stockflow-profile-open", true),
+  );
+  const [isNarrow, setIsNarrow] = useState(
+    () => window.matchMedia("(max-width:900px)").matches,
+  );
+  const [mobileProfileOpen, setMobileProfileOpen] = useState(false);
+  const profileVisible = isNarrow ? mobileProfileOpen : profileOpen;
+  const closeProfile = () =>
+    isNarrow ? setMobileProfileOpen(false) : setProfileOpen(false);
+  useEffect(() => {
+    const media = window.matchMedia("(max-width:900px)");
+    const change = (e) => setIsNarrow(e.matches);
+    media.addEventListener("change", change);
+    return () => media.removeEventListener("change", change);
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "stockflow-profile-open",
+        JSON.stringify(profileOpen),
+      );
+    } catch {}
+  }, [profileOpen]);
+  const [compact, setCompact] = useState(() =>
+    stored("stockflow-compact", false),
+  );
   const navigate = (id) => {
     setActiveTab(id);
     setPanel(null);
@@ -65,28 +88,28 @@ export default function App() {
   }, [load]);
   useEffect(() => {
     const key = (e) => {
-      if (e.key === "Escape") setPanel(null);
+      if (e.key === "Escape") {
+        setPanel(null);
+        setMobileProfileOpen(false);
+      }
     };
     document.addEventListener("keydown", key);
     return () => document.removeEventListener("keydown", key);
   }, []);
   useEffect(() => {
     try {
-      localStorage.setItem("stockflow-favorites", JSON.stringify(favorites));
       localStorage.setItem("stockflow-compact", JSON.stringify(compact));
     } catch {}
-  }, [favorites, compact]);
+  }, [compact]);
   const { products, warehouses, history } = catalog;
   const selected =
     products.find((p) => p.productId === selectedId) || products[0];
   const select = (p) => setSelectedId(p.productId);
   const low = products.filter((p) => p.stockQuantity <= 10);
-  const toggleFavorite = (id) =>
-    setFavorites((values) =>
-      values.includes(id) ? values.filter((v) => v !== id) : [...values, id],
-    );
   return (
-    <div className={`app-shell ${compact ? "compact" : ""}`}>
+    <div
+      className={`app-shell ${compact ? "compact" : ""} ${profileVisible ? "profile-expanded" : "profile-collapsed"} ${isNarrow && profileVisible ? "profile-mobile-open" : ""}`}
+    >
       <a className="skip-link" href="#main-content">
         Đến nội dung chính
       </a>
@@ -123,6 +146,21 @@ export default function App() {
             <kbd>↵</kbd>
           </form>
           <div className="header-tools">
+            <button
+              className="icon-button profile-toggle"
+              aria-label={
+                profileVisible ? "Ẩn bảng thông tin" : "Mở bảng thông tin"
+              }
+              aria-expanded={profileVisible}
+              aria-controls="profile-panel"
+              onClick={() =>
+                isNarrow
+                  ? setMobileProfileOpen(!mobileProfileOpen)
+                  : setProfileOpen(!profileOpen)
+              }
+            >
+              <Icon name="box" size={20} />
+            </button>
             <button
               className={`icon-button notification-button ${panel === "notifications" ? "active" : ""}`}
               aria-label={`Thông báo: ${low.length} sản phẩm tồn thấp`}
@@ -209,11 +247,8 @@ export default function App() {
                 loading={loading}
                 error={error}
                 search={search}
-                selected={selected}
                 onSelect={select}
                 navigate={navigate}
-                favorites={favorites}
-                toggleFavorite={toggleFavorite}
               />
             )}
             {activeTab === "ai-entry" && (
@@ -237,113 +272,132 @@ export default function App() {
               <span>Made for a better workflow.</span>
             </footer>
           </main>
-          <aside className="profile-panel">
-            <div className="profile-top">
-              <span className={`connection-label ${error ? "offline" : ""}`}>
-                <i />
-                {loading
-                  ? "Đang kết nối"
-                  : error
-                    ? "Chưa kết nối"
-                    : "Đã kết nối"}
-              </span>
-              <button
-                className="icon-button"
-                onClick={load}
-                disabled={loading}
-                aria-label="Làm mới thống kê"
-              >
-                <Icon name="refresh" size={16} />
-              </button>
-            </div>
-            <div className="profile-identity">
-              <div className="profile-avatar">
-                <img src="/avatar.svg" alt="Ảnh đại diện minh họa Group 4" />
-                <span />
-              </div>
-              <h2>Group 4</h2>
-              <p>Không gian quản lý kho</p>
-              <span className="profile-role">STOCK MANAGEMENT</span>
-            </div>
-            <div className="profile-stats">
-              <div>
-                <span className="pastel-icon purple">
-                  <Icon name="box" size={19} />
+          {isNarrow && profileVisible && (
+            <button
+              className="profile-backdrop"
+              aria-label="Đóng bảng thông tin"
+              onClick={closeProfile}
+            />
+          )}
+          {profileVisible && (
+            <aside className="profile-panel" id="profile-panel">
+              <div className="profile-top">
+                <span className={`connection-label ${error ? "offline" : ""}`}>
+                  <i />
+                  {loading
+                    ? "Đang kết nối"
+                    : error
+                      ? "Chưa kết nối"
+                      : "Đã kết nối"}
                 </span>
-                <p>
-                  Danh mục sản phẩm
-                  <strong>
-                    {loading ? "—" : products.length}
-                    <small> sản phẩm</small>
-                  </strong>
-                </p>
+                <button
+                  className="icon-button"
+                  aria-label="Đóng bảng thông tin"
+                  onClick={closeProfile}
+                >
+                  <Icon name="close" size={16} />
+                </button>
+                <button
+                  className="icon-button"
+                  onClick={load}
+                  disabled={loading}
+                  aria-label="Làm mới thống kê"
+                >
+                  <Icon name="refresh" size={16} />
+                </button>
               </div>
-              <div>
-                <span className="pastel-icon peach">
-                  <Icon name="warehouse" size={19} />
-                </span>
-                <p>
-                  Điểm kho đang quản lý
-                  <strong>
-                    {loading
-                      ? "—"
-                      : warehouses.filter((w) => !w.isUnallocated).length}
-                    <small> kho hàng</small>
-                  </strong>
-                </p>
+              <div className="profile-identity">
+                <div className="profile-avatar">
+                  <img src="/avatar.svg" alt="Ảnh đại diện minh họa Group 4" />
+                  <span />
+                </div>
+                <h2>Group 4</h2>
+                <p>Không gian quản lý kho</p>
+                <span className="profile-role">STOCK MANAGEMENT</span>
               </div>
-              <div>
-                <span className="pastel-icon blue">
-                  <Icon name="history" size={19} />
-                </span>
-                <p>
-                  Giao dịch đã xác nhận
-                  <strong>
-                    {loading ? "—" : history.length}
-                    <small> giao dịch</small>
-                  </strong>
-                </p>
-              </div>
-            </div>
-            <div className="selected-detail">
-              <div className="side-heading">
-                ĐANG THEO DÕI<span>LIVE</span>
-              </div>
-              {selected ? (
-                <>
-                  <h3>{selected.productName}</h3>
+              <div className="profile-stats">
+                <div>
+                  <span className="pastel-icon purple">
+                    <Icon name="box" size={19} />
+                  </span>
                   <p>
+                    Danh mục sản phẩm
                     <strong>
-                      {selected.stockQuantity.toLocaleString("vi-VN")}
-                    </strong>{" "}
-                    {selected.unit}
+                      {loading ? "—" : products.length}
+                      <small> sản phẩm</small>
+                    </strong>
                   </p>
-                  <small>Tồn kho tổng trên toàn hệ thống</small>
-                </>
-              ) : (
-                <p>Chọn một sản phẩm để xem thông tin.</p>
-              )}
-            </div>
-            <div className="upgrade-card">
-              <div className="upgrade-symbol">
-                <Icon name="spark" size={24} />
-                <span>+</span>
+                </div>
+                <div>
+                  <span className="pastel-icon peach">
+                    <Icon name="warehouse" size={19} />
+                  </span>
+                  <p>
+                    Điểm kho đang quản lý
+                    <strong>
+                      {loading
+                        ? "—"
+                        : warehouses.filter((w) => !w.isUnallocated).length}
+                      <small> kho hàng</small>
+                    </strong>
+                  </p>
+                </div>
+                <div>
+                  <span className="pastel-icon blue">
+                    <Icon name="history" size={19} />
+                  </span>
+                  <p>
+                    Giao dịch đã xác nhận
+                    <strong>
+                      {loading ? "—" : history.length}
+                      <small> giao dịch</small>
+                    </strong>
+                  </p>
+                </div>
               </div>
-              <h3>
-                Nâng tầm quy trình
-                <br />
-                cùng trợ lý AI.
-              </h3>
-              <p>
-                Giảm thao tác nhập liệu.
-                <br />
-                Dành thời gian cho điều quan trọng.
-              </p>
-              <button className="btn pill" onClick={() => navigate("ai-entry")}>
-                Khám phá ngay <Icon name="arrow" size={16} />
-              </button>
-            </div>
-          </aside>
+              <div className="selected-detail">
+                <div className="side-heading">
+                  ĐANG THEO DÕI<span>LIVE</span>
+                </div>
+                {selected ? (
+                  <>
+                    <h3>{selected.productName}</h3>
+                    <p>
+                      <strong>
+                        {selected.stockQuantity.toLocaleString("vi-VN")}
+                      </strong>{" "}
+                      {selected.unit}
+                    </p>
+                    <small>Tồn kho tổng trên toàn hệ thống</small>
+                  </>
+                ) : (
+                  <p>Chọn một sản phẩm để xem thông tin.</p>
+                )}
+              </div>
+              <div className="upgrade-card">
+                <div className="upgrade-symbol">
+                  <Icon name="spark" size={24} />
+                  <span>+</span>
+                </div>
+                <h3>
+                  Nâng tầm quy trình
+                  <br />
+                  cùng trợ lý AI.
+                </h3>
+                <p>
+                  Giảm thao tác nhập liệu.
+                  <br />
+                  Dành thời gian cho điều quan trọng.
+                </p>
+                <button
+                  className="btn pill"
+                  onClick={() => navigate("ai-entry")}
+                >
+                  Khám phá ngay <Icon name="arrow" size={16} />
+                </button>
+              </div>
+            </aside>
+          )}
         </div>
       </div>
     </div>

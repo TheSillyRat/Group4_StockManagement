@@ -139,7 +139,7 @@ export default function AiInventoryEntry({ onViewHistory, onDataChange }) {
           <div>
             <h3>
               {saved.transactionIds?.length > 1
-                ? `Đã ghi nhận ${saved.transactionIds.length} đơn xuất`
+                ? `Đã ghi nhận ${saved.transactionIds.length} dòng giao dịch`
                 : `Đã ghi nhận giao dịch #${saved.transactionId}`}
             </h3>
             <p>{saved.message}</p>

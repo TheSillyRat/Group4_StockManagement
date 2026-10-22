@@ -33,6 +33,17 @@ namespace webAPI.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("DestinationType")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("DestinationWarehouseId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ExternalDestination")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<int>("ProductId")
                         .HasColumnType("int");
 
@@ -51,6 +62,8 @@ namespace webAPI.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("TransactionId");
+
+                    b.HasIndex("DestinationWarehouseId");
 
                     b.HasIndex("ProductId");
 
@@ -341,6 +354,11 @@ namespace webAPI.Migrations
 
             modelBuilder.Entity("webAPI.Entities.InventoryTransaction", b =>
                 {
+                    b.HasOne("webAPI.Entities.Warehouse", "DestinationWarehouse")
+                        .WithMany()
+                        .HasForeignKey("DestinationWarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("webAPI.Entities.Product", "Product")
                         .WithMany("InventoryTransactions")
                         .HasForeignKey("ProductId")
@@ -357,6 +375,8 @@ namespace webAPI.Migrations
                         .HasForeignKey("WarehouseId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("DestinationWarehouse");
 
                     b.Navigation("Product");
 

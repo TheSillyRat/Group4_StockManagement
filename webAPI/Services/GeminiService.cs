@@ -82,6 +82,9 @@ Return ONLY a valid JSON object with the following schema:
   ""productName"": ""<Name of product, e.g. Product A>"",
   ""supplierName"": ""<Name of supplier if provided, e.g. Supplier X, otherwise null>"",
   ""warehouseName"": ""<Name of warehouse, e.g. Binh Tan Warehouse>"",
+  ""destinationType"": ""Warehouse"" or ""External"" or null,
+  ""destinationWarehouseName"": ""<Destination warehouse for dispatch, otherwise null>"",
+  ""externalDestination"": ""<External recipient or location if specified, otherwise null>"",
   ""quantity"": <positive integer, e.g. 20>,
   ""unit"": ""<unit of measurement, e.g. box, kg, item>"",
   ""isAmbiguous"": <boolean, true if any required detail is missing, vague, or unclear>,
@@ -91,10 +94,11 @@ Return ONLY a valid JSON object with the following schema:
 Rules:
 1. Transaction type must be strictly ""Receive"" or ""Dispatch"".
 2. If the user request lacks essential details such as product name, target warehouse, or quantity (for example: ""Send some items to warehouse"", ""Nhập một ít hàng"", ""Move items""), set ""isAmbiguous"": true and provide a specific clarificationMessage listing what is missing.
-3. Receive means receiving FROM a supplier INTO a warehouse. Supplier is required: extract it exactly, or mark ambiguous and ask for it. Dispatch means shipping FROM a warehouse to outside: ALWAYS set supplierName=null, even if a supplier is mentioned. Never invent a supplier.
+3. Receive means receiving FROM a supplier INTO a warehouse. Supplier is required. Dispatch means shipping FROM a source warehouse TO another warehouse or outside. ALWAYS set supplierName=null for Dispatch. Never invent a supplier.
 4. Quantity must be a positive integer > 0. If missing or non-numeric, mark ""isAmbiguous"": true.
 5. Return RAW JSON only, without markdown fences (no ```json or ```).
-6. Preserve the exact product name from the request, including new or unfamiliar products. Never replace it with an example product. Product existence is checked against the database by the application, not by you.";
+6. Preserve the exact product name from the request, including new or unfamiliar products. Never replace it with an example product. Product existence is checked against the database by the application, not by you.
+7. For Dispatch warehouseName is always the SOURCE (from/từ). If the destination is another warehouse (to/đến/sang), set destinationType=Warehouse and destinationWarehouseName to its exact name. If explicitly outside or sent to a customer, set destinationType=External and externalDestination if provided. If no destination is stated, return destinationType=null, isAmbiguous=true and ask whether to send to an existing warehouse or outside. Never assume outside. For Receive all destination fields are null.";
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.deepseek.com/chat/completions");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
@@ -293,11 +297,26 @@ Rules:
             }
         }
 
+        if (dto.TransactionType == "Dispatch")
+        {
+            var source = Regex.Match(text, @"(?:from|từ)\s+(?<source>.+?)(?=\s+(?:to|đến|sang|tới|ra ngoài)\b|[.!?]|$)", RegexOptions.IgnoreCase);
+            if(source.Success) dto.WarehouseName=CleanEntityName(source.Groups["source"].Value);
+            var target = Regex.Match(text, @"(?:\bto|đến|sang|tới)\s+(?<target>.+?)(?=[.!?]|$)", RegexOptions.IgnoreCase);
+            if(target.Success)
+            {
+                var targetName=CleanEntityName(target.Groups["target"].Value);
+                if(Regex.IsMatch(targetName,@"warehouse|\bkho\b",RegexOptions.IgnoreCase)) {dto.DestinationType="Warehouse";dto.DestinationWarehouseName=targetName;}
+                else {dto.DestinationType="External";dto.ExternalDestination=targetName;}
+            }
+            else if(Regex.IsMatch(text,@"ra ngoài|outside|externally|external",RegexOptions.IgnoreCase)) dto.DestinationType="External";
+            dto.SupplierName=null;
+        }
         // Ambiguity Detection
         var missingFields = new List<string>();
         if (string.IsNullOrWhiteSpace(dto.TransactionType)) missingFields.Add("transaction type (Receive / Dispatch)");
         if (string.IsNullOrWhiteSpace(dto.ProductName) || dto.ProductName.Equals("items", StringComparison.OrdinalIgnoreCase)) missingFields.Add("product name");
         if (dto.Quantity <= 0) missingFields.Add("quantity");
+        if (dto.TransactionType=="Dispatch" && dto.DestinationType==null) missingFields.Add("nơi đến: kho nhận hoặc xuất ra ngoài");
         if (string.IsNullOrWhiteSpace(dto.WarehouseName) || dto.WarehouseName.Equals("warehouse", StringComparison.OrdinalIgnoreCase)) missingFields.Add("warehouse name");
 
         if (hasAmbiguousWords || missingFields.Count > 0)

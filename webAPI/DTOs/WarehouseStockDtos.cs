@@ -18,6 +18,7 @@ public class DispatchAllocation
 }
 public class DispatchOptionsDto
 {
+    public int? DestinationWarehouseId { get; set; }
     public int ProductId { get; set; }
     public int WarehouseId { get; set; }
     public int RequestedQuantity { get; set; }

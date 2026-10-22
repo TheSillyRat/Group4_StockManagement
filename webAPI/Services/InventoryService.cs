@@ -8,16 +8,17 @@ public class InventoryService(ApplicationDbContext context, ILogger<InventorySer
 {
     private static ConfirmResult Failure(string message) => new() { Success = false, Message = message };
 
-    public async Task<DispatchOptionsDto> GetDispatchOptionsAsync(int productId, int warehouseId, int quantity)
+    public async Task<DispatchOptionsDto> GetDispatchOptionsAsync(int productId, int warehouseId, int quantity, int? destinationWarehouseId = null)
     {
         var stocks = await context.WarehouseStocks.AsNoTracking()
-            .Where(s => s.ProductId == productId && !s.Warehouse.IsUnallocated && s.Quantity > 0)
+            .Where(s => s.ProductId == productId && !s.Warehouse.IsUnallocated && s.Quantity > 0 && s.WarehouseId != destinationWarehouseId)
             .Select(s => new WarehouseStockDto { ProductId = s.ProductId, ProductName = s.Product.ProductName, WarehouseId = s.WarehouseId, WarehouseName = s.Warehouse.WarehouseName, Quantity = s.Quantity, Unit = s.Product.Unit })
             .OrderByDescending(s => s.Quantity).ThenBy(s => s.WarehouseId).ToListAsync();
         var available = stocks.FirstOrDefault(s => s.WarehouseId == warehouseId)?.Quantity ?? 0;
         var result = new DispatchOptionsDto
         {
             ProductId = productId,
+            DestinationWarehouseId = destinationWarehouseId,
             WarehouseId = warehouseId,
             RequestedQuantity = quantity,
             AvailableQuantity = available,
@@ -47,9 +48,29 @@ public class InventoryService(ApplicationDbContext context, ILogger<InventorySer
         dto.ProductExists = dto.WarehouseExists = dto.SupplierExists = false;
         dto.ProductNotFound = dto.CanCreateProduct = false;
         dto.DispatchOptions = null; dto.ValidationMessage = null;
+        dto.DestinationWarehouseId = null;
         var messages = new List<string>();
         var receive = string.Equals(dto.TransactionType, "Receive", StringComparison.OrdinalIgnoreCase);
         var dispatch = string.Equals(dto.TransactionType, "Dispatch", StringComparison.OrdinalIgnoreCase);
+        var destinationValid = !dispatch;
+        if (dispatch)
+        {
+            if (string.Equals(dto.DestinationType, "Warehouse", StringComparison.OrdinalIgnoreCase))
+            {
+                dto.DestinationType = "Warehouse"; dto.ExternalDestination = null;
+                var targetName = dto.DestinationWarehouseName?.Trim().ToLower();
+                var target = string.IsNullOrWhiteSpace(targetName) ? null : await context.Warehouses.AsNoTracking().FirstOrDefaultAsync(w=>!w.IsUnallocated && w.WarehouseName.ToLower()==targetName);
+                if(target != null) { dto.DestinationWarehouseId=target.WarehouseId; destinationValid=true; }
+                else messages.Add("Kho nhận không tồn tại. Vui lòng chọn một kho hiện có.");
+            }
+            else if (string.Equals(dto.DestinationType, "External", StringComparison.OrdinalIgnoreCase))
+            {
+                dto.DestinationType="External"; dto.DestinationWarehouseName=null;
+                dto.ExternalDestination=dto.ExternalDestination?.Trim(); destinationValid=(dto.ExternalDestination?.Length??0)<=200;
+            }
+            else { dto.DestinationType=null; messages.Add("Bạn muốn xuất đến kho nào hay xuất hàng ra ngoài? Vui lòng chọn nơi đến."); }
+        }
+        else { dto.DestinationType=null;dto.DestinationWarehouseName=null;dto.ExternalDestination=null; }
         var productName = dto.ProductName?.Trim().ToLower();
         var product = string.IsNullOrWhiteSpace(productName) ? null : await context.Products.AsNoTracking().FirstOrDefaultAsync(p => p.ProductName.ToLower() == productName);
         if (product != null) { dto.ProductExists = true; dto.ProductId = product.ProductId; if (string.IsNullOrWhiteSpace(dto.Unit)) dto.Unit = product.Unit; }
@@ -62,6 +83,7 @@ public class InventoryService(ApplicationDbContext context, ILogger<InventorySer
         var warehouse = string.IsNullOrWhiteSpace(warehouseName) ? null : await context.Warehouses.AsNoTracking().FirstOrDefaultAsync(w => w.WarehouseName.ToLower() == warehouseName && !w.IsUnallocated);
         if (warehouse != null) { dto.WarehouseExists = true; dto.WarehouseId = warehouse.WarehouseId; }
         else messages.Add("Vui lòng chọn kho nhập/ xuất hợp lệ.");
+        if(dispatch && dto.DestinationWarehouseId.HasValue && dto.DestinationWarehouseId==dto.WarehouseId) {destinationValid=false;messages.Add("Kho nhận phải khác kho xuất.");}
         if (receive)
         {
             var supplierName = dto.SupplierName?.Trim().ToLower();
@@ -74,10 +96,10 @@ public class InventoryService(ApplicationDbContext context, ILogger<InventorySer
         if (!unitMatches) messages.Add($"Đơn vị tính phải là '{product!.Unit}'.");
         if (dispatch && product != null && warehouse != null && dto.Quantity > 0)
         {
-            dto.DispatchOptions = await GetDispatchOptionsAsync(product.ProductId, warehouse.WarehouseId, dto.Quantity);
+            dto.DispatchOptions = await GetDispatchOptionsAsync(product.ProductId, warehouse.WarehouseId, dto.Quantity,dto.DestinationWarehouseId);
             if (dto.DispatchOptions.ShortageQuantity > 0) messages.Add(dto.DispatchOptions.Message);
         }
-        dto.IsValid = !dto.IsAmbiguous && (receive || dispatch) && dto.ProductExists && dto.WarehouseExists && dto.SupplierExists && unitMatches && dto.Quantity > 0 && (dto.DispatchOptions?.ShortageQuantity ?? 0) == 0;
+        dto.IsValid = !dto.IsAmbiguous && destinationValid && (receive || dispatch) && dto.ProductExists && dto.WarehouseExists && dto.SupplierExists && unitMatches && dto.Quantity > 0 && (dto.DispatchOptions?.ShortageQuantity ?? 0) == 0;
         dto.ValidationMessage = messages.Count > 0 ? string.Join(" ", messages) : null;
         return dto;
     }
@@ -102,6 +124,20 @@ public class InventoryService(ApplicationDbContext context, ILogger<InventorySer
         var warehouse = request.WarehouseId.HasValue ? await context.Warehouses.FindAsync(request.WarehouseId.Value)
             : string.IsNullOrWhiteSpace(warehouseName) ? null : await context.Warehouses.FirstOrDefaultAsync(w => w.WarehouseName.ToLower() == warehouseName);
         if (warehouse == null || warehouse.IsUnallocated) return Failure("Vui lòng chọn kho thực tế để nhập/xuất. Tồn chờ phân bổ cần được phân bổ vào kho trước.");
+        var internalTransfer=dispatch && string.Equals(request.DestinationType,"Warehouse",StringComparison.OrdinalIgnoreCase);
+        var externalDispatch=dispatch && string.Equals(request.DestinationType,"External",StringComparison.OrdinalIgnoreCase);
+        Warehouse? destination=null;
+        if(dispatch)
+        {
+            if(!internalTransfer && !externalDispatch) return Failure("Vui lòng chọn nơi đến: một kho hiện có hoặc xuất hàng ra ngoài.");
+            if(internalTransfer)
+            {
+                destination=request.DestinationWarehouseId.HasValue ? await context.Warehouses.FindAsync(request.DestinationWarehouseId.Value) : null;
+                if(destination==null || destination.IsUnallocated || destination.WarehouseId==warehouse.WarehouseId) return Failure("Kho nhận phải tồn tại, là kho thực tế và khác kho xuất.");
+            }
+            else if(request.DestinationWarehouseId.HasValue || (request.ExternalDestination?.Trim().Length??0)>200)
+                return Failure("Xuất ra ngoài không kèm kho nhận; tên/địa điểm nhận tối đa 200 ký tự.");
+        }
         Supplier? supplier = null;
         if (receive)
         {
@@ -119,10 +155,11 @@ public class InventoryService(ApplicationDbContext context, ILogger<InventorySer
             if ((allocations.Count > 1 || allocations[0].WarehouseId != warehouse.WarehouseId) && !request.ConfirmAdditionalDispatches)
                 return Failure("Bạn cần đồng ý tạo thêm đơn xuất từ các kho khác trước khi xác nhận.");
             var ids = allocations.Select(a => a.WarehouseId).ToList();
+            if(internalTransfer && ids.Contains(destination!.WarehouseId)) return Failure("Kho nhận không được đồng thời là kho nguồn trong kế hoạch xuất.");
             if (await context.Warehouses.CountAsync(w => ids.Contains(w.WarehouseId) && !w.IsUnallocated) != ids.Count) return Failure("Kế hoạch xuất chứa kho không hợp lệ.");
             if (!request.ConfirmAdditionalDispatches)
             {
-                var options = await GetDispatchOptionsAsync(product!.ProductId, warehouse.WarehouseId, request.Quantity);
+                var options = await GetDispatchOptionsAsync(product!.ProductId, warehouse.WarehouseId, request.Quantity,destination?.WarehouseId);
                 if (options.ShortageQuantity > 0) return new() { Success = false, Message = options.Message, DispatchOptions = options };
             }
         }
@@ -139,7 +176,9 @@ public class InventoryService(ApplicationDbContext context, ILogger<InventorySer
             var productQuery = context.Products.Where(p => p.ProductId == product!.ProductId);
             var affected = receive
                 ? await productQuery.Where(p => p.StockQuantity <= int.MaxValue - request.Quantity).ExecuteUpdateAsync(u => u.SetProperty(p => p.StockQuantity, p => p.StockQuantity + request.Quantity))
-                : await productQuery.Where(p => p.StockQuantity >= request.Quantity).ExecuteUpdateAsync(u => u.SetProperty(p => p.StockQuantity, p => p.StockQuantity - request.Quantity));
+                : internalTransfer
+                    ? await productQuery.Where(p=>p.StockQuantity>=request.Quantity).ExecuteUpdateAsync(u=>u.SetProperty(p=>p.StockQuantity,p=>p.StockQuantity))
+                    : await productQuery.Where(p => p.StockQuantity >= request.Quantity).ExecuteUpdateAsync(u => u.SetProperty(p => p.StockQuantity, p => p.StockQuantity - request.Quantity));
             if (affected != 1) { await transaction.RollbackAsync(); return Failure("Tồn kho không đủ hoặc số lượng vượt giới hạn. Vui lòng làm mới."); }
             if (receive)
             {
@@ -153,11 +192,19 @@ public class InventoryService(ApplicationDbContext context, ILogger<InventorySer
                 if (updated != 1)
                 {
                     await transaction.RollbackAsync(); context.ChangeTracker.Clear();
-                    var options = await GetDispatchOptionsAsync(product!.ProductId, warehouse.WarehouseId, request.Quantity);
+                    var options = await GetDispatchOptionsAsync(product!.ProductId, warehouse.WarehouseId, request.Quantity,destination?.WarehouseId);
                     return new() { Success = false, Message = "Tồn ở một kho không đủ hoặc vừa thay đổi. Chưa lưu đơn nào. " + options.Message, DispatchOptions = options };
                 }
             }
-            var records = allocations.Select(a => new InventoryTransaction { ProductId = product!.ProductId, WarehouseId = a.WarehouseId, SupplierId = receive ? supplier!.SupplierId : null, Quantity = a.Quantity, TransactionType = receive ? "Receive" : "Dispatch", CreatedAt = DateTime.UtcNow }).ToList();
+            if(internalTransfer) await AddToWarehouseAsync(product!.ProductId,destination!.WarehouseId,request.Quantity);
+            var records = allocations.Select(a => new InventoryTransaction {
+                ProductId = product!.ProductId, WarehouseId = a.WarehouseId, SupplierId = receive ? supplier!.SupplierId : null,
+                Quantity = a.Quantity, TransactionType = receive ? "Receive" : internalTransfer?"TransferOut":"Dispatch", CreatedAt = DateTime.UtcNow,
+                DestinationType=dispatch?(internalTransfer?"Warehouse":"External"):null,
+                DestinationWarehouseId=destination?.WarehouseId,
+                ExternalDestination=externalDispatch?(string.IsNullOrWhiteSpace(request.ExternalDestination)?"Bên ngoài":request.ExternalDestination.Trim()):null
+            }).ToList();
+            if(internalTransfer) records.Add(new InventoryTransaction {ProductId=product!.ProductId,WarehouseId=destination!.WarehouseId,Quantity=request.Quantity,TransactionType="TransferIn",DestinationType="Warehouse",DestinationWarehouseId=destination.WarehouseId});
             context.InventoryTransactions.AddRange(records); await context.SaveChangesAsync();
             var total = await productQuery.AsNoTracking().Select(p => p.StockQuantity).SingleAsync();
             await transaction.CommitAsync();
@@ -168,7 +215,9 @@ public class InventoryService(ApplicationDbContext context, ILogger<InventorySer
                 TransactionId = records[0].TransactionId,
                 TransactionIds = records.Select(t => t.TransactionId).ToList(),
                 NewStockQuantity = total,
-                Message = $"{(createProduct ? "Đã tạo sản phẩm mới. " : "")}Đã lưu {records.Count} đơn {(receive ? "nhập từ nhà cung cấp vào kho" : "xuất từ kho ra ngoài")}. Tổng tồn {product.ProductName}: {total} {product.Unit}."
+                Message = internalTransfer
+                    ? $"Đã chuyển {request.Quantity} {product!.Unit} từ {allocations.Count} kho đến {destination!.WarehouseName}. Tổng tồn không thay đổi: {total} {product.Unit}."
+                    : $"{(createProduct ? "Đã tạo sản phẩm mới. " : "")}Đã lưu {records.Count} đơn {(receive ? "nhập từ nhà cung cấp vào kho" : "xuất ra "+records[0].ExternalDestination)}. Tổng tồn {product!.ProductName}: {total} {product.Unit}."
             };
         }
         catch (Exception ex)
@@ -200,8 +249,8 @@ public class InventoryService(ApplicationDbContext context, ILogger<InventorySer
             if (changed != 1) { await transaction.RollbackAsync(); return Failure("Kho nguồn không đủ hàng để chuyển."); }
             await AddToWarehouseAsync(request.ProductId, request.ToWarehouseId, request.Quantity);
             var records = new[] {
-                new InventoryTransaction {ProductId=request.ProductId,WarehouseId=request.FromWarehouseId,TransactionType="TransferOut",Quantity=request.Quantity},
-                new InventoryTransaction {ProductId=request.ProductId,WarehouseId=request.ToWarehouseId,TransactionType="TransferIn",Quantity=request.Quantity}
+                new InventoryTransaction {ProductId=request.ProductId,WarehouseId=request.FromWarehouseId,TransactionType="TransferOut",Quantity=request.Quantity,DestinationType="Warehouse",DestinationWarehouseId=request.ToWarehouseId},
+                new InventoryTransaction {ProductId=request.ProductId,WarehouseId=request.ToWarehouseId,TransactionType="TransferIn",Quantity=request.Quantity,DestinationType="Warehouse",DestinationWarehouseId=request.ToWarehouseId}
             };
             context.InventoryTransactions.AddRange(records); await context.SaveChangesAsync(); await transaction.CommitAsync();
             return new() { Success = true, ProductId = request.ProductId, TransactionId = records[0].TransactionId, TransactionIds = records.Select(t => t.TransactionId).ToList(), Message = "Đã chuyển/phân bổ tồn kho. Tổng tồn toàn hệ thống không thay đổi." };
@@ -214,5 +263,5 @@ public class InventoryService(ApplicationDbContext context, ILogger<InventorySer
 
     public async Task<IEnumerable<TransactionHistoryDto>> GetTransactionHistoryAsync() => await context.InventoryTransactions.AsNoTracking()
         .OrderByDescending(t => t.CreatedAt).ThenByDescending(t => t.TransactionId)
-        .Select(t => new TransactionHistoryDto { TransactionId = t.TransactionId, TransactionType = t.TransactionType, ProductName = t.Product!.ProductName, SupplierName = t.Supplier != null ? t.Supplier.SupplierName : null, WarehouseName = t.Warehouse!.WarehouseName, Quantity = t.Quantity, Unit = t.Product.Unit, CreatedAt = t.CreatedAt }).ToListAsync();
+        .Select(t => new TransactionHistoryDto { TransactionId = t.TransactionId, TransactionType = t.TransactionType, ProductName = t.Product!.ProductName, SupplierName = t.Supplier != null ? t.Supplier.SupplierName : null, WarehouseName = t.Warehouse!.WarehouseName, Quantity = t.Quantity, Unit = t.Product.Unit, CreatedAt = t.CreatedAt, DestinationType=t.DestinationType, DestinationWarehouseName=t.DestinationWarehouse!=null?t.DestinationWarehouse.WarehouseName:null,ExternalDestination=t.ExternalDestination }).ToListAsync();
 }

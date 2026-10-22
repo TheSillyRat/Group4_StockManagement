@@ -58,9 +58,15 @@ export const inventoryApi = {
   getProducts: (warehouseId) =>
     request(`/products${warehouseId ? `?warehouseId=${warehouseId}` : ""}`),
   getWarehouseStock: (id) => request(`/warehouses/${id}/stock`),
-  getDispatchOptions: (productId, warehouseId, quantity, signal) =>
+  getDispatchOptions: (
+    productId,
+    warehouseId,
+    quantity,
+    signal,
+    destinationWarehouseId,
+  ) =>
     request(
-      `/inventory/dispatch-options?productId=${productId}&warehouseId=${warehouseId}&quantity=${quantity}`,
+      `/inventory/dispatch-options?productId=${productId}&warehouseId=${warehouseId}&quantity=${quantity}${destinationWarehouseId ? `&destinationWarehouseId=${destinationWarehouseId}` : ""}`,
       { signal },
     ),
   transferStock: (data) =>

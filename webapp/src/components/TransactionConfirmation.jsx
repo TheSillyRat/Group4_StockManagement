@@ -53,6 +53,22 @@ export default function TransactionConfirmation({
   const qty = Number(form.quantity),
     isDispatch = form.transactionType === "Dispatch",
     isReceive = form.transactionType === "Receive";
+  const destination = warehouses.find(
+    (w) =>
+      !w.isUnallocated &&
+      (w.warehouseId === Number(form.destinationWarehouseId) ||
+        (!form.destinationWarehouseId &&
+          w.warehouseName.toLowerCase() ===
+            (form.destinationWarehouseName || "").trim().toLowerCase())),
+  );
+  const internalTransfer = isDispatch && form.destinationType === "Warehouse";
+  const destinationId = internalTransfer ? destination?.warehouseId : null;
+  const destinationValid =
+    !isDispatch ||
+    form.destinationType === "External" ||
+    (internalTransfer &&
+      destination &&
+      destination.warehouseId !== warehouse?.warehouseId);
   const missingProduct = !product && !!form.productName?.trim(),
     creatingProduct = isReceive && !product && createNewProduct;
   const wrongUnit =
@@ -63,6 +79,7 @@ export default function TransactionConfirmation({
     plan &&
     plan.productId === product?.productId &&
     plan.warehouseId === warehouse?.warehouseId &&
+    Number(plan.destinationWarehouseId || 0) === Number(destinationId || 0) &&
     plan.requestedQuantity === qty
       ? plan
       : null;
@@ -87,6 +104,7 @@ export default function TransactionConfirmation({
     qty <= 2147483647 &&
     !wrongUnit &&
     !supplierBusy &&
+    destinationValid &&
     (!isReceive || !!supplier) &&
     (!isDispatch ||
       (!planLoading &&
@@ -102,6 +120,7 @@ export default function TransactionConfirmation({
       !isDispatch ||
       !product ||
       !warehouse ||
+      !destinationValid ||
       !Number.isInteger(qty) ||
       qty <= 0 ||
       qty > 2147483647
@@ -117,6 +136,7 @@ export default function TransactionConfirmation({
             warehouse.warehouseId,
             qty,
             controller.signal,
+            destinationId,
           )
           .then(setPlan)
           .catch((e) => {
@@ -131,7 +151,14 @@ export default function TransactionConfirmation({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [isDispatch, product?.productId, warehouse?.warehouseId, qty]);
+  }, [
+    isDispatch,
+    product?.productId,
+    warehouse?.warehouseId,
+    qty,
+    destinationId,
+    destinationValid,
+  ]);
   const update = (key, value) => setForm((f) => ({ ...f, [key]: value }));
   const addSupplier = async () => {
     if (!supplierName.trim() || supplierBusy) return;
@@ -171,6 +198,12 @@ export default function TransactionConfirmation({
       createNewProduct: !!creatingProduct,
       warehouseId: warehouse.warehouseId,
       supplierId: isReceive ? supplier.supplierId : null,
+      destinationType: isDispatch ? form.destinationType : null,
+      destinationWarehouseId: destinationId,
+      externalDestination:
+        isDispatch && form.destinationType === "External"
+          ? form.externalDestination?.trim() || null
+          : null,
       quantity: qty,
       unit: product?.unit || form.unit.trim(),
       confirmAdditionalDispatches: acceptedPlan,
@@ -194,7 +227,7 @@ export default function TransactionConfirmation({
             <h2 className="card-title">Kiểm tra & xác nhận</h2>
             <p className="card-subtitle">
               {isDispatch
-                ? "Xuất từ kho ra ngoài · Không có nhà cung cấp"
+                ? "Xuất từ kho đến kho khác hoặc ra ngoài · Không có nhà cung cấp"
                 : "Nhập từ nhà cung cấp vào kho"}
               . Chưa thay đổi tồn kho.
             </p>
@@ -282,7 +315,7 @@ export default function TransactionConfirmation({
                   Chọn loại giao dịch
                 </option>
                 <option value="Receive">Nhập từ nhà cung cấp</option>
-                <option value="Dispatch">Xuất từ kho ra ngoài</option>
+                <option value="Dispatch">Xuất hàng / chuyển đến kho</option>
               </select>
             </div>
             <div className="form-field">
@@ -399,6 +432,74 @@ export default function TransactionConfirmation({
                 onChange={(e) => update("quantity", e.target.value)}
               />
             </div>
+            {isDispatch && (
+              <div className="form-field">
+                <label htmlFor="review-destination">Xuất đến đâu? *</label>
+                <select
+                  id="review-destination"
+                  required
+                  value={
+                    form.destinationType === "External"
+                      ? "External"
+                      : destination?.warehouseId || ""
+                  }
+                  onChange={(e) => {
+                    const w = warehouses.find(
+                      (w) => w.warehouseId === Number(e.target.value),
+                    );
+                    setForm((f) => ({
+                      ...f,
+                      destinationType:
+                        e.target.value === "External"
+                          ? "External"
+                          : "Warehouse",
+                      destinationWarehouseId: w?.warehouseId || null,
+                      destinationWarehouseName: w?.warehouseName || null,
+                      externalDestination: null,
+                    }));
+                  }}
+                >
+                  <option value="" disabled>
+                    Chọn kho nhận hoặc xuất ra ngoài
+                  </option>
+                  <option value="External">Xuất hàng ra ngoài</option>
+                  <optgroup label="Chuyển đến kho hiện có">
+                    {warehouses
+                      .filter(
+                        (w) =>
+                          !w.isUnallocated &&
+                          w.warehouseId !== warehouse?.warehouseId,
+                      )
+                      .map((w) => (
+                        <option key={w.warehouseId} value={w.warehouseId}>
+                          {w.warehouseName}
+                        </option>
+                      ))}
+                  </optgroup>
+                </select>
+                <small>
+                  {internalTransfer
+                    ? "Chuyển giữa kho: tổng tồn toàn hệ thống không đổi."
+                    : "Chọn rõ nơi đến trước khi xác nhận xuất."}
+                </small>
+              </div>
+            )}
+            {isDispatch && form.destinationType === "External" && (
+              <div className="form-field">
+                <label htmlFor="review-external-destination">
+                  Người nhận / địa điểm bên ngoài <span>Tùy chọn</span>
+                </label>
+                <input
+                  id="review-external-destination"
+                  maxLength={200}
+                  value={form.externalDestination || ""}
+                  onChange={(e) =>
+                    update("externalDestination", e.target.value)
+                  }
+                  placeholder="Ví dụ: Khách hàng An Phát, cửa hàng Quận 1"
+                />
+              </div>
+            )}
             <div className="form-field">
               <label htmlFor="review-unit">Đơn vị tính</label>
               <input
@@ -489,6 +590,24 @@ export default function TransactionConfirmation({
           <p className="field-error" role="alert">
             Vui lòng chọn nhà cung cấp để nhập hàng vào kho.
           </p>
+        )}
+        {isDispatch && !destinationValid && (
+          <p className="field-error" role="alert">
+            Vui lòng chọn nơi đến. Kho nhận phải khác kho xuất.
+          </p>
+        )}
+        {isDispatch && destinationValid && (
+          <div className="destination-summary" role="status">
+            <Icon name="arrow" size={16} />
+            <span>
+              {warehouse?.warehouseName || "Kho xuất"} →{" "}
+              <strong>
+                {internalTransfer
+                  ? destination.warehouseName
+                  : form.externalDestination?.trim() || "Bên ngoài"}
+              </strong>
+            </span>
+          </div>
         )}
         {wrongUnit && (
           <div className="alert alert-warning" role="alert">
